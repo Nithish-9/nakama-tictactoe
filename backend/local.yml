@@ -1,0 +1,13 @@
+name: nakama-tictactoe
+data_dir: /nakama/data
+
+logger:
+  level: DEBUG
+
+console:
+  port: 7351
+  username: admin
+  password: password
+
+socket:
+  port: 7350
