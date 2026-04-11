@@ -16,6 +16,7 @@ services:
 
   nakama:
     build: .
+    image: tictactoe-backend
     depends_on:
       postgres:
         condition: service_healthy
@@ -23,8 +24,11 @@ services:
       - "7349:7349"
       - "7350:7350"
       - "7351:7351"
-    command: >
-      --config /nakama/data/local.yml
-      --database.address postgres:5432
+    entrypoint:
+      - "/bin/sh"
+      - "-ec"
+      - |
+        /nakama/nakama migrate up --database.address postgres:localdb@postgres:5432/nakama?sslmode=disable
+        /nakama/nakama --config /nakama/data/local.yml --database.address postgres:localdb@postgres:5432/nakama?sslmode=disable
     volumes:
       - ./local.yml:/nakama/data/local.yml

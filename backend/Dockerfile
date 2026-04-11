@@ -1,4 +1,4 @@
-FROM heroiclabs/nakama-pluginbuilder:latest AS builder
+FROM heroiclabs/nakama-pluginbuilder:3.26.0 AS builder
 
 ENV GO111MODULE=on
 ENV CGO_ENABLED=1
