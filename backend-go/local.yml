@@ -11,3 +11,7 @@ console:
 
 socket:
   port: 7350
+
+session:
+  cors_allowed_origins: 
+    - "http://localhost:5173"
