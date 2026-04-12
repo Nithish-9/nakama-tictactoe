@@ -122,6 +122,7 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
   // Requires GameConfig to call onCreateRoom(mode) — update GameConfig:
   // onClick={() => onCreateRoom(mode)}
   async function handleCreateRoom(mode = "classic") {
+    console.log(' handleCreateRoom :' + mode);
     if (!socketReady) return;
     setStatusMsg("Creating room…");
     try {

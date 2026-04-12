@@ -83,8 +83,6 @@ export async function restoreSession() {
   }
 }
 
-// ── Socket ────────────────────────────────────────────────────────────────────
-
 let _socket = null;
 
 export async function connectSocket(session) {
@@ -109,7 +107,20 @@ export async function disconnectSocket() {
   }
 }
 
-// ── Account ───────────────────────────────────────────────────────────────────
+export function saveMatchSession(matchId, mySymbol, oppSymbol) {
+  sessionStorage.setItem("active_match", JSON.stringify({ matchId, mySymbol, oppSymbol }));
+}
+
+export function loadMatchSession() {
+  try {
+    const raw = sessionStorage.getItem("active_match");
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+export function clearMatchSession() {
+  sessionStorage.removeItem("active_match");
+}
 
 export async function getAccount(session) {
   return await client.getAccount(session);
@@ -132,22 +143,19 @@ export async function cancelMatchmaking(socket, ticket) {
   await socket.removeMatchmaker(ticket.ticket);
 }
 
-// ── Match ─────────────────────────────────────────────────────────────────────
-
 export async function createMatch(session, mode = "classic") {
   const result = await client.rpc(session, "create_match", { mode });
-  return JSON.parse(result.payload);
+  return result.payload;
 }
 
 export async function joinMatch(socket, matchId, token) {
-  return await socket.joinMatch(matchId, token);
+  const result = await socket.joinMatch(matchId, token);
+  return result
 }
 
 export async function leaveMatch(socket, matchId) {
   await socket.leaveMatch(matchId);
 }
-
-// ── Leaderboard ───────────────────────────────────────────────────────────────
 
 export async function getLeaderboard(session, limit = 10) {
   return await client.listLeaderboardRecords(session, "tic_tac_toe_global", [], limit);
@@ -157,7 +165,21 @@ export async function writeLeaderboardScore(session, score) {
   return await client.writeLeaderboardRecord(session, "tic_tac_toe_global", score);
 }
 
-// ── Op codes ──────────────────────────────────────────────────────────────────
+export async function getPlayerStats(session) {
+  try {
+    const result = await client.readStorageObjects(session, {
+      object_ids: [{
+        collection: "player_stats",
+        key: "stats",
+        user_id: session.user_id,
+      }],
+    });
+    const obj = result.objects?.[0];
+    return obj ? JSON.parse(obj.value) : { wins: 0, losses: 0, streak: 0 };
+  } catch {
+    return { wins: 0, losses: 0, streak: 0 };
+  }
+}
 
 export const OpCode = {
   MOVE: 1,
@@ -165,4 +187,5 @@ export const OpCode = {
   GAME_OVER: 3,
   PLAYER_READY: 4,
   TIMER_TICK: 5,
+  OPPONENT_LEFT: 6,
 };

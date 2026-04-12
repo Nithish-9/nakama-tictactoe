@@ -9,21 +9,19 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
-// MatchState defines the internal state of a game session.
 type MatchState struct {
-	Board     []string          `json:"board"`
-	Marks     map[string]string `json:"marks"`
-	Turn      string            `json:"turn"`
-	MoveCount int               `json:"move_count"`
-	GameOver  bool              `json:"game_over"`
-	Winner    string            `json:"winner"`
-	Mode      string            `json:"mode"`
-	// Reconnect grace period
-	DisconnectedUser string `json:"disconnected_user"` // userID who left
-	DisconnectTick   int64  `json:"disconnect_tick"`   // tick when they left
+	Board            []string          `json:"board"`
+	Marks            map[string]string `json:"marks"`
+	Turn             string            `json:"turn"`
+	MoveCount        int               `json:"move_count"`
+	GameOver         bool              `json:"game_over"`
+	Winner           string            `json:"winner"`
+	Mode             string            `json:"mode"`
+	DisconnectedUser string            `json:"disconnected_user"`
+	DisconnectTick   int64             `json:"disconnect_tick"`
 }
 
-const ReconnectGraceTicks = 30
+const ReconnectGraceTicks = 30 // 3 seconds at 10 ticks/sec
 
 type TicTacToeMatch struct{}
 
@@ -47,6 +45,12 @@ func (m *TicTacToeMatch) MatchInit(ctx context.Context, logger runtime.Logger, d
 
 func (m *TicTacToeMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, presence runtime.Presence, metadata map[string]string) (interface{}, bool, string) {
 	s := state.(*MatchState)
+
+	// Always allow rejoining players
+	if _, exists := s.Marks[presence.GetUserId()]; exists {
+		return s, true, ""
+	}
+
 	if len(s.Marks) >= 2 {
 		return s, false, "Match is full"
 	}
@@ -55,7 +59,21 @@ func (m *TicTacToeMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Lo
 
 func (m *TicTacToeMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, presences []runtime.Presence) interface{} {
 	s := state.(*MatchState)
+
 	for _, p := range presences {
+		// ── Rejoining player ──────────────────────────────────────────
+		if _, exists := s.Marks[p.GetUserId()]; exists {
+			logger.Info("Player rejoined: %s", p.GetUserId())
+			s.DisconnectedUser = ""
+			s.DisconnectTick = 0
+
+			// Send current state only to rejoining player
+			data, _ := json.Marshal(buildClientState(s))
+			dispatcher.BroadcastMessage(2, data, []runtime.Presence{p}, nil, true)
+			continue
+		}
+
+		// ── New player joining ────────────────────────────────────────
 		if len(s.Marks) < 2 {
 			if len(s.Marks) == 0 {
 				s.Marks[p.GetUserId()] = "X"
@@ -64,29 +82,37 @@ func (m *TicTacToeMatch) MatchJoin(ctx context.Context, logger runtime.Logger, d
 				s.Marks[p.GetUserId()] = "O"
 			}
 		}
-		// Player reconnected — clear grace period
-		if p.GetUserId() == s.DisconnectedUser {
-			logger.Info("Player reconnected: %s", p.GetUserId())
-			s.DisconnectedUser = ""
-			s.DisconnectTick = 0
-		}
 	}
 
+	// Broadcast to all when match is full
 	if len(s.Marks) == 2 && !s.GameOver {
 		BroadcastState(dispatcher, s, 2)
 	}
+
 	return s
 }
 
 func (m *TicTacToeMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, messages []runtime.MatchData) interface{} {
 	s := state.(*MatchState)
 
-	// Check grace period expiry
+	// ── Grace period countdown ────────────────────────────────────────────
 	if s.DisconnectedUser != "" && !s.GameOver {
+		ticksLeft := ReconnectGraceTicks - (tick - s.DisconnectTick)
+
+		// Broadcast countdown every tick so client can show timer
+		if ticksLeft > 0 {
+			type CountdownPayload struct {
+				SecondsLeft int `json:"seconds_left"`
+			}
+			secondsLeft := int(ticksLeft / 10)
+			data, _ := json.Marshal(CountdownPayload{SecondsLeft: secondsLeft})
+			dispatcher.BroadcastMessage(6, data, nil, nil, true)
+		}
+
+		// Grace period expired — remaining player wins
 		if tick-s.DisconnectTick >= ReconnectGraceTicks {
-			logger.Info("Grace period expired, ending match. Disconnected: %s", s.DisconnectedUser)
+			logger.Info("Grace period expired. Disconnected: %s", s.DisconnectedUser)
 			s.GameOver = true
-			// Remaining player wins
 			for id := range s.Marks {
 				if id != s.DisconnectedUser {
 					s.Winner = id
@@ -98,53 +124,92 @@ func (m *TicTacToeMatch) MatchLoop(ctx context.Context, logger runtime.Logger, d
 		}
 	}
 
+	// ── Process moves ─────────────────────────────────────────────────────
 	for _, msg := range messages {
-		if msg.GetOpCode() == 1 {
-			var move struct {
-				Index int `json:"index"`
-			}
-			if err := json.Unmarshal(msg.GetData(), &move); err != nil {
-				continue
-			}
+		if msg.GetOpCode() != 1 {
+			continue
+		}
 
-			userID := msg.GetUserId()
-			if s.GameOver || s.Turn != userID || move.Index < 0 || move.Index > 8 || s.Board[move.Index] != "" {
-				continue
-			}
+		logger.Info("MatchLoop tick: %d, messages: %d", tick, len(messages))
 
-			s.Board[move.Index] = s.Marks[userID]
-			s.MoveCount++
+		var move struct {
+			Index int `json:"index"`
+		}
+		if err := json.Unmarshal(msg.GetData(), &move); err != nil {
+			continue
+		}
 
-			if winMark := CheckWinner(s.Board, 3, move.Index); winMark != "" {
-				s.GameOver = true
-				s.Winner = userID
-				UpdateLeaderboard(ctx, logger, nk, userID, 10)
-			} else if s.MoveCount == 9 {
-				s.GameOver = true
-				s.Winner = "draw"
-			} else {
-				for id := range s.Marks {
-					if id != s.Turn {
-						s.Turn = id
-						break
-					}
+		userID := msg.GetUserId()
+
+		if s.GameOver || s.Turn != userID || move.Index < 0 || move.Index > 8 || s.Board[move.Index] != "" {
+			logger.Info("Move rejected — GameOver: %v, Turn: %s, User: %s, Index: %d",
+				s.GameOver, s.Turn, userID, move.Index)
+			continue
+		}
+
+		s.Board[move.Index] = s.Marks[userID]
+		s.MoveCount++
+
+		if winMark := CheckWinner(s.Board, 3, move.Index); winMark != "" {
+			s.GameOver = true
+			s.Winner = userID
+			UpdateLeaderboard(ctx, logger, nk, userID, 10)
+
+			// Find loser ID
+			loserID := ""
+			for id := range s.Marks {
+				if id != userID {
+					loserID = id
+					break
 				}
 			}
+			UpdatePlayerStats(ctx, logger, nk, userID, loserID, false) // ← add
+			BroadcastState(dispatcher, s, 3)
 
-			BroadcastState(dispatcher, s, 2)
+		} else if s.MoveCount == 9 {
+			s.GameOver = true
+			s.Winner = "draw"
+
+			// Both players draw
+			ids := []string{}
+			for id := range s.Marks {
+				ids = append(ids, id)
+			}
+			if len(ids) == 2 {
+				UpdatePlayerStats(ctx, logger, nk, ids[0], ids[1], true) // ← add
+			}
+			BroadcastState(dispatcher, s, 3)
+		} else {
+			// Switch turn
+			for id := range s.Marks {
+				if id != s.Turn {
+					s.Turn = id
+					break
+				}
+			}
+			BroadcastState(dispatcher, s, 2) // GAME_STATE
 		}
 	}
+
 	return s
 }
 
 func (m *TicTacToeMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, presences []runtime.Presence) interface{} {
 	s := state.(*MatchState)
+
 	if !s.GameOver && len(presences) > 0 {
-		// Start grace period instead of ending immediately
 		s.DisconnectedUser = presences[0].GetUserId()
 		s.DisconnectTick = tick
-		logger.Info("Player disconnected, starting grace period: %s", s.DisconnectedUser)
+		logger.Info("Player disconnected, grace period started: %s", s.DisconnectedUser)
+
+		// Notify remaining player immediately
+		type OpponentLeftPayload struct {
+			SecondsLeft int `json:"seconds_left"`
+		}
+		data, _ := json.Marshal(OpponentLeftPayload{SecondsLeft: ReconnectGraceTicks / 10})
+		dispatcher.BroadcastMessage(6, data, nil, nil, true)
 	}
+
 	return s
 }
 
@@ -154,6 +219,36 @@ func (m *TicTacToeMatch) MatchTerminate(ctx context.Context, logger runtime.Logg
 
 func (m *TicTacToeMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, data string) (interface{}, string) {
 	return state, ""
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+type ClientState struct {
+	Board       []string `json:"board"`
+	CurrentTurn string   `json:"currentTurn"`
+	GameOver    bool     `json:"game_over"`
+	Winner      string   `json:"winner"`
+}
+
+func buildClientState(state *MatchState) ClientState {
+	turnSymbol := state.Marks[state.Turn]
+
+	winnerSymbol := state.Winner
+	if winnerSymbol != "" && winnerSymbol != "draw" {
+		winnerSymbol = state.Marks[state.Winner]
+	}
+
+	return ClientState{
+		Board:       state.Board,
+		CurrentTurn: turnSymbol,
+		GameOver:    state.GameOver,
+		Winner:      winnerSymbol,
+	}
+}
+
+func BroadcastState(dispatcher runtime.MatchDispatcher, state *MatchState, opCode int64) {
+	data, _ := json.Marshal(buildClientState(state))
+	dispatcher.BroadcastMessage(opCode, data, nil, nil, true)
 }
 
 func CheckWinner(board []string, size int, lastMoveIndex int) string {
@@ -216,32 +311,6 @@ func CheckWinner(board []string, size int, lastMoveIndex int) string {
 	return ""
 }
 
-func BroadcastState(dispatcher runtime.MatchDispatcher, state *MatchState, opCode int64) {
-	type ClientState struct {
-		Board       []string `json:"board"`
-		CurrentTurn string   `json:"currentTurn"` // "X" or "O"
-		GameOver    bool     `json:"game_over"`
-		Winner      string   `json:"winner"` // "X", "O", or "draw"
-	}
-
-	turnSymbol := state.Marks[state.Turn] // userID → "X"/"O"
-
-	winnerSymbol := state.Winner
-	if winnerSymbol != "" && winnerSymbol != "draw" {
-		winnerSymbol = state.Marks[state.Winner] // userID → "X"/"O"
-	}
-
-	clientState := ClientState{
-		Board:       state.Board,
-		CurrentTurn: turnSymbol,
-		GameOver:    state.GameOver,
-		Winner:      winnerSymbol,
-	}
-
-	data, _ := json.Marshal(clientState)
-	dispatcher.BroadcastMessage(opCode, data, nil, nil, true)
-}
-
 func UpdateLeaderboard(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userID string, score int64) {
 	metadata := map[string]interface{}{"game": "tic_tac_toe"}
 	_, err := nk.LeaderboardRecordWrite(ctx, "tic_tac_toe_global", userID, "", score, 0, metadata, nil)
@@ -251,7 +320,6 @@ func UpdateLeaderboard(ctx context.Context, logger runtime.Logger, nk runtime.Na
 }
 
 func AddUserToLeaderboard(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-
 	userID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 	username := ctx.Value(runtime.RUNTIME_CTX_USERNAME).(string)
 
@@ -276,25 +344,13 @@ func AddUserToLeaderboard(ctx context.Context, logger runtime.Logger, db *sql.DB
 		return "already_initialized", nil
 	}
 
-	_, err = nk.LeaderboardRecordWrite(
-		ctx,
-		"tic_tac_toe_global",
-		userID,
-		username,
-		0,
-		0,
-		nil,
-		nil,
-	)
+	_, err = nk.LeaderboardRecordWrite(ctx, "tic_tac_toe_global", userID, username, 0, 0, nil, nil)
 	if err != nil {
 		logger.Error("Leaderboard write failed: %v", err)
 		return "", err
 	}
 
-	valueMap := map[string]interface{}{
-		"initialized": true,
-	}
-
+	valueMap := map[string]interface{}{"initialized": true}
 	jsonValue, err := json.Marshal(valueMap)
 	if err != nil {
 		return "", err
@@ -316,4 +372,60 @@ func AddUserToLeaderboard(ctx context.Context, logger runtime.Logger, db *sql.DB
 	}
 
 	return "initialized", nil
+}
+
+func UpdatePlayerStats(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, winnerID string, loserID string, isDraw bool) {
+	updateStats := func(userID string, won bool, draw bool) {
+		records, err := nk.StorageRead(ctx, []*runtime.StorageRead{
+			{Collection: "player_stats", Key: "stats", UserID: userID},
+		})
+
+		wins, losses, streak := 0, 0, 0
+
+		if err == nil && len(records) > 0 {
+			var stats map[string]int
+			if json.Unmarshal([]byte(records[0].Value), &stats) == nil {
+				wins = stats["wins"]
+				losses = stats["losses"]
+				streak = stats["streak"]
+			}
+		}
+
+		if draw {
+			streak = 0
+		} else if won {
+			wins++
+			streak++
+		} else {
+			losses++
+			streak = 0
+		}
+
+		data, _ := json.Marshal(map[string]int{
+			"wins": wins, "losses": losses, "streak": streak,
+		})
+
+		nk.StorageWrite(ctx, []*runtime.StorageWrite{
+			{
+				Collection:      "player_stats",
+				Key:             "stats",
+				UserID:          userID,
+				Value:           string(data),
+				PermissionRead:  1,
+				PermissionWrite: 0,
+			},
+		})
+	}
+
+	if isDraw {
+		updateStats(winnerID, false, true)
+		if loserID != "" {
+			updateStats(loserID, false, true)
+		}
+	} else {
+		updateStats(winnerID, true, false)
+		if loserID != "" {
+			updateStats(loserID, false, false)
+		}
+	}
 }

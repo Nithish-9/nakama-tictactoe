@@ -66,7 +66,7 @@ export default function GameConfig({ onFindMatch, onCreateRoom, onJoinRoom, load
 
         <button
           className="btn btn-ghost config-btn"
-          onClick={onCreateRoom}
+          onClick={()=>onCreateRoom(mode)}
           disabled={loading}
         >
           ✦ Create Private Room
