@@ -2,7 +2,7 @@ name: nakama-tictactoe
 data_dir: /nakama/data
 
 logger:
-  level: DEBUG
+  level: info
 
 console:
   port: 7351
@@ -13,5 +13,8 @@ socket:
   port: 7350
 
 session:
-  cors_allowed_origins: 
+  token_expiry_sec: 7200
+  refresh_token_expiry_sec: 604800
+  cors_allowed_origins:
     - "http://localhost:5173"
+    - "http://127.0.0.1:5173"
