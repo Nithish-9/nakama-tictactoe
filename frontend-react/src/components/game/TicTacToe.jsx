@@ -22,24 +22,20 @@ export default function TicTacToe({
   session,
   socket,
   match,
-  mySymbol,       // "X" or "O"
+  mySymbol,
   opponentName,
   myName,
   onGameEnd,
 }) {
   const [board,       setBoard]       = useState(Array(9).fill(null));
-  const [currentTurn, setCurrentTurn] = useState("X"); // X always goes first
-  const [result,      setResult]      = useState(null); // {winner, line}
+  const [currentTurn, setCurrentTurn] = useState("X");
+  const [result,      setResult]      = useState(null);
   const [timeLeft,    setTimeLeft]    = useState(null);
-  const [waiting,     setWaiting]     = useState(false);
-  const [statusMsg,   setStatusMsg]   = useState("");
-  const timerRef  = useRef(null);
-  const boardRef  = useRef(board);
-  boardRef.current = board;
+  const timerRef = useRef(null);
 
   const isMyTurn = currentTurn === mySymbol && !result;
 
-  // ── Socket listeners ────────────────────────────────────────────────────────
+  // ── Match data handler ────────────────────────────────────────────────────
   useEffect(() => {
     if (!socket) return;
 
@@ -48,12 +44,18 @@ export default function TicTacToe({
       const payload = JSON.parse(new TextDecoder().decode(data.data));
 
       if (opCode === OpCode.GAME_STATE) {
-        const { board: newBoard, currentTurn: turn, timerSeconds } = payload;
+        const { board: newBoard, currentTurn: turn } = payload;
         setBoard(newBoard);
         setCurrentTurn(turn);
-        if (timerSeconds !== undefined) startTimer(timerSeconds);
-        const res = checkWinner(newBoard);
-        if (res) setResult(res);
+
+        // Fallback winner check in case GAME_OVER is missed
+        if (!result) {
+          const res = checkWinner(newBoard);
+          if (res) {
+            setResult(res);
+            clearTimer();
+          }
+        }
       }
 
       if (opCode === OpCode.GAME_OVER) {
@@ -63,14 +65,16 @@ export default function TicTacToe({
         clearTimer();
       }
 
+      // Server is the timer source of truth — no client-side interval needed
       if (opCode === OpCode.TIMER_TICK) {
         setTimeLeft(payload.seconds);
+        if (payload.seconds <= 0) clearTimer();
       }
     }
 
     socket.onmatchdata = onMatchData;
     return () => { socket.onmatchdata = null; };
-  }, [socket, mySymbol]);
+  }, [socket, mySymbol, result]);
 
   function getWinLine(b, w) {
     if (!w || w === "draw") return [];
@@ -80,55 +84,52 @@ export default function TicTacToe({
     return [];
   }
 
-  // ── Timer ────────────────────────────────────────────────────────────────────
-  function startTimer(seconds) {
-    clearTimer();
-    setTimeLeft(seconds);
-    timerRef.current = setInterval(() => {
-      setTimeLeft(t => {
-        if (t <= 1) { clearTimer(); return 0; }
-        return t - 1;
-      });
-    }, 1000);
-  }
-
+  // ── Timer ─────────────────────────────────────────────────────────────────
   function clearTimer() {
-    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
   }
 
   useEffect(() => () => clearTimer(), []);
 
-  // ── Move ─────────────────────────────────────────────────────────────────────
+  // ── Move ──────────────────────────────────────────────────────────────────
   async function handleCellClick(idx) {
     if (!isMyTurn || board[idx] || result) return;
 
-    // Optimistic update
+    const boardBeforeMove = [...board];
     const next = [...board];
-    next[idx]  = mySymbol;
+    next[idx] = mySymbol;
     setBoard(next);
 
-    // Send to server
     try {
-      await socket.sendMatchState(match.match_id, OpCode.MOVE, JSON.stringify({ index: idx }));
+      await socket.sendMatchState(
+        match.match_id,
+        OpCode.MOVE,
+        JSON.stringify({ index: idx })
+      );
     } catch (err) {
       console.error("Move failed", err);
-      setBoard(boardRef.current); // revert
+      setBoard(boardBeforeMove);
     }
   }
 
-  // ── Leave ─────────────────────────────────────────────────────────────────────
+  // ── Leave ─────────────────────────────────────────────────────────────────
   async function handleLeave() {
     clearTimer();
     try { await leaveMatch(socket, match.match_id); } catch { /* ok */ }
     onGameEnd(result);
   }
 
-  // ── UI helpers ────────────────────────────────────────────────────────────────
-  const winLine = result?.line ?? [];
+  // ── UI helpers ────────────────────────────────────────────────────────────
+  const winLine    = result?.line ?? [];
+  const timerColor = timeLeft !== null && timeLeft <= 10 ? "var(--pink)" : "var(--cyan)";
+  const myTurnLabel = isMyTurn ? `Your turn (${mySymbol})` : `${opponentName}'s turn`;
 
   function cellClass(idx) {
     const val = board[idx];
-    let cls   = "cell";
+    let cls = "cell";
     if (val === "X") cls += " cell-x";
     if (val === "O") cls += " cell-o";
     if (winLine.includes(idx)) cls += " cell-win";
@@ -136,9 +137,7 @@ export default function TicTacToe({
     return cls;
   }
 
-  const myTurnLabel    = isMyTurn    ? `Your turn (${mySymbol})` : `${opponentName}'s turn`;
-  const timerColor     = timeLeft !== null && timeLeft <= 10 ? "var(--pink)" : "var(--cyan)";
-
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="game-screen">
       {/* Header bar */}
@@ -149,12 +148,11 @@ export default function TicTacToe({
         </div>
 
         <div className="game-center-info">
-          {timeLeft !== null && (
+          {timeLeft !== null ? (
             <div className="timer-ring" style={{ "--timer-color": timerColor }}>
               <span className="timer-value" style={{ color: timerColor }}>{timeLeft}</span>
             </div>
-          )}
-          {timeLeft === null && (
+          ) : (
             <div className="vs-badge">VS</div>
           )}
         </div>
@@ -195,12 +193,11 @@ export default function TicTacToe({
             </button>
           ))}
 
-          {/* Win overlay lines */}
           {winLine.length === 3 && <WinLine line={winLine} />}
         </div>
       </div>
 
-      {/* Match ID share */}
+      {/* Match ID bar */}
       <div className="match-id-bar glass">
         <span className="text-dim" style={{ fontSize: "0.7rem" }}>Match ID:</span>
         <code className="match-id-code">{match?.match_id?.slice(0, 8)}…</code>
@@ -209,6 +206,9 @@ export default function TicTacToe({
           onClick={() => navigator.clipboard.writeText(match?.match_id ?? "")}
         >
           Copy
+        </button>
+        <button className="btn btn-ghost" onClick={handleLeave}>
+          ← Leave
         </button>
       </div>
 
@@ -226,7 +226,7 @@ export default function TicTacToe({
   );
 }
 
-/* ── Win-line SVG overlay ────────────────────────────────────────────────────── */
+
 function WinLine({ line }) {
   const positions = {
     0: [1/6, 1/6], 1: [1/2, 1/6], 2: [5/6, 1/6],
@@ -248,17 +248,16 @@ function WinLine({ line }) {
   );
 }
 
-/* ── Result overlay ─────────────────────────────────────────────────────────── */
 function ResultOverlay({ result, mySymbol, myName, opponentName, onLeave }) {
   const { winner, reason } = result;
   let headline, sub, emoji, cssClass;
 
   if (winner === "draw") {
-    headline = "DRAW"; sub = "Nobody wins this round"; emoji = "🤝"; cssClass = "draw";
+    headline = "DRAW";    sub = "Nobody wins this round";        emoji = "🤝"; cssClass = "draw";
   } else if (winner === mySymbol) {
-    headline = "VICTORY"; sub = reason === "forfeit" ? "Opponent timed out" : "You won the match!"; emoji = "🏆"; cssClass = "win";
+    headline = "VICTORY"; sub = reason === "forfeit" ? "Opponent timed out"      : "You won the match!";       emoji = "🏆"; cssClass = "win";
   } else {
-    headline = "DEFEAT"; sub = reason === "forfeit" ? "You ran out of time" : "Better luck next round"; emoji = "💀"; cssClass = "loss";
+    headline = "DEFEAT";  sub = reason === "forfeit" ? "You ran out of time"     : "Better luck next round";   emoji = "💀"; cssClass = "loss";
   }
 
   return (
@@ -275,7 +274,9 @@ function ResultOverlay({ result, mySymbol, myName, opponentName, onLeave }) {
           </div>
           <span className="rs-vs text-dim">vs</span>
           <div className="rs-player">
-            <span className={`rs-symbol ${mySymbol === "X" ? "o" : "x"}`}>{mySymbol === "X" ? "O" : "X"}</span>
+            <span className={`rs-symbol ${mySymbol === "X" ? "o" : "x"}`}>
+              {mySymbol === "X" ? "O" : "X"}
+            </span>
             <span className="rs-name">{opponentName}</span>
           </div>
         </div>

@@ -9,56 +9,58 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
+// MatchState defines the internal state of a game session.
 type MatchState struct {
-	Board        []string          `json:"board"`
-	Size         int               `json:"size"`
-	Marks        map[string]string `json:"marks"`
-	Turn         string            `json:"turn"`
-	MoveCount    int               `json:"move_count"`
-	GameOver     bool              `json:"game_over"`
-	Winner       string            `json:"winner"`
-	LastTurnTick int64             `json:"last_turn_tick"`
+	Board     []string          `json:"board"`
+	Marks     map[string]string `json:"marks"` // UserID -> "X" or "O"
+	Turn      string            `json:"turn"`  // Current UserID
+	MoveCount int               `json:"move_count"`
+	GameOver  bool              `json:"game_over"`
+	Winner    string            `json:"winner"`
+	Mode      string            `json:"mode"`
 }
 
 type TicTacToeMatch struct{}
 
 func (m *TicTacToeMatch) MatchInit(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, params map[string]interface{}) (interface{}, int, string) {
-	size := 3
-	if s, ok := params["size"].(float64); ok {
-		size = int(s)
-	}
-
-	matchName := "Unnamed Match"
-	if n, ok := params["name"].(string); ok {
-		matchName = n
+	mode, _ := params["mode"].(string)
+	if mode == "" {
+		mode = "classic"
 	}
 
 	state := &MatchState{
-		Board:     make([]string, size*size),
-		Size:      size,
+		Board:     make([]string, 9),
 		Marks:     make(map[string]string),
 		MoveCount: 0,
 		GameOver:  false,
+		Mode:      mode,
 	}
 
-	label := fmt.Sprintf(`{"name":"%s", "size":%d, "open":true}`, matchName, size)
+	label := fmt.Sprintf(`{"mode":"%s"}`, mode)
 	return state, 10, label
 }
 
 func (m *TicTacToeMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, presence runtime.Presence, metadata map[string]string) (interface{}, bool, string) {
-	return state, true, ""
+	s := state.(*MatchState)
+	if len(s.Marks) >= 2 {
+		return s, false, "Match is full"
+	}
+	return s, true, ""
 }
 
 func (m *TicTacToeMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, presences []runtime.Presence) interface{} {
 	s := state.(*MatchState)
 	for _, p := range presences {
-
 		if len(s.Marks) == 0 {
 			s.Marks[p.GetUserId()] = "X"
 			s.Turn = p.GetUserId()
-		} else if len(s.Marks) == 1 {
+		} else {
 			s.Marks[p.GetUserId()] = "O"
 		}
+	}
+
+	if len(s.Marks) == 2 {
+		BroadcastState(dispatcher, s, 2)
 	}
 	return s
 }
@@ -67,7 +69,6 @@ func (m *TicTacToeMatch) MatchLoop(ctx context.Context, logger runtime.Logger, d
 	s := state.(*MatchState)
 
 	for _, msg := range messages {
-
 		if msg.GetOpCode() == 1 {
 			var move struct {
 				Index int `json:"index"`
@@ -77,30 +78,21 @@ func (m *TicTacToeMatch) MatchLoop(ctx context.Context, logger runtime.Logger, d
 			}
 
 			userID := msg.GetUserId()
-			mark, isPlayer := s.Marks[userID]
-
-			if !isPlayer || s.Turn != userID || s.Board[move.Index] != "" || s.GameOver {
+			if s.GameOver || s.Turn != userID || move.Index < 0 || move.Index > 8 || s.Board[move.Index] != "" {
 				continue
 			}
 
-			s.Board[move.Index] = mark
+			s.Board[move.Index] = s.Marks[userID]
 			s.MoveCount++
 
-			if winMark := CheckWinner(s.Board, s.Size, move.Index); winMark != "" {
+			if winMark := CheckWinner(s.Board, 3, move.Index); winMark != "" {
 				s.GameOver = true
 				s.Winner = userID
-				// Update Leaderboard
-				UpdateLeaderboard(ctx, nk, s.Winner, 10)
-				for id := range s.Marks {
-					if id != s.Winner {
-						UpdateLeaderboard(ctx, nk, id, -10)
-					}
-				}
-			} else if s.MoveCount == s.Size*s.Size {
+				UpdateLeaderboard(ctx, logger, nk, userID, 10)
+			} else if s.MoveCount == 9 {
 				s.GameOver = true
 				s.Winner = "draw"
 			} else {
-				// Switch turn
 				for id := range s.Marks {
 					if id != s.Turn {
 						s.Turn = id
@@ -108,16 +100,20 @@ func (m *TicTacToeMatch) MatchLoop(ctx context.Context, logger runtime.Logger, d
 					}
 				}
 			}
-			// Broadcast the updated state to everyone (OpCode 2 = State Update)
-			data, _ := json.Marshal(s)
-			dispatcher.BroadcastMessage(2, data, nil, nil, true)
+
+			BroadcastState(dispatcher, s, 2)
 		}
 	}
 	return s
 }
 
 func (m *TicTacToeMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, presences []runtime.Presence) interface{} {
-	return state
+	s := state.(*MatchState)
+	if !s.GameOver && len(presences) > 0 {
+		s.GameOver = true
+		BroadcastState(dispatcher, s, 2)
+	}
+	return s
 }
 
 func (m *TicTacToeMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, graceSeconds int) interface{} {
@@ -126,4 +122,145 @@ func (m *TicTacToeMatch) MatchTerminate(ctx context.Context, logger runtime.Logg
 
 func (m *TicTacToeMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, data string) (interface{}, string) {
 	return state, ""
+}
+
+func CheckWinner(board []string, size int, lastMoveIndex int) string {
+	player := board[lastMoveIndex]
+	if player == "" {
+		return ""
+	}
+
+	row := lastMoveIndex / size
+	col := lastMoveIndex % size
+
+	rowMatch := true
+	for i := 0; i < size; i++ {
+		if board[row*size+i] != player {
+			rowMatch = false
+			break
+		}
+	}
+	if rowMatch {
+		return player
+	}
+
+	colMatch := true
+	for i := 0; i < size; i++ {
+		if board[i*size+col] != player {
+			colMatch = false
+			break
+		}
+	}
+	if colMatch {
+		return player
+	}
+
+	if row == col {
+		diagMatch := true
+		for i := 0; i < size; i++ {
+			if board[i*size+i] != player {
+				diagMatch = false
+				break
+			}
+		}
+		if diagMatch {
+			return player
+		}
+	}
+
+	if row+col == size-1 {
+		antiDiagMatch := true
+		for i := 0; i < size; i++ {
+			if board[i*size+(size-1-i)] != player {
+				antiDiagMatch = false
+				break
+			}
+		}
+		if antiDiagMatch {
+			return player
+		}
+	}
+
+	return ""
+}
+
+func BroadcastState(dispatcher runtime.MatchDispatcher, state *MatchState, opCode int64) {
+	data, _ := json.Marshal(state)
+	dispatcher.BroadcastMessage(opCode, data, nil, nil, true)
+}
+
+func UpdateLeaderboard(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userID string, score int64) {
+	metadata := map[string]interface{}{"game": "tic_tac_toe"}
+	_, err := nk.LeaderboardRecordWrite(ctx, "tic_tac_toe_global", userID, "", score, 0, metadata, nil)
+	if err != nil {
+		logger.Error("Leaderboard write failed: %v", err)
+	}
+}
+
+func AddUserToLeaderboard(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+
+	userID := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	username := ctx.Value(runtime.RUNTIME_CTX_USERNAME).(string)
+
+	if username == "" {
+		logger.Error("Username is empty for userID: %s", userID)
+		return "", runtime.NewError("username is required", 3)
+	}
+
+	records, err := nk.StorageRead(ctx, []*runtime.StorageRead{
+		{
+			Collection: "user_meta",
+			Key:        "leaderboard_initialized",
+			UserID:     userID,
+		},
+	})
+	if err != nil {
+		logger.Error("Storage read failed: %v", err)
+		return "", err
+	}
+
+	if len(records) > 0 {
+		return "already_initialized", nil
+	}
+
+	_, err = nk.LeaderboardRecordWrite(
+		ctx,
+		"tic_tac_toe_global",
+		userID,
+		username,
+		0,
+		0,
+		nil,
+		nil,
+	)
+	if err != nil {
+		logger.Error("Leaderboard write failed: %v", err)
+		return "", err
+	}
+
+	valueMap := map[string]interface{}{
+		"initialized": true,
+	}
+
+	jsonValue, err := json.Marshal(valueMap)
+	if err != nil {
+		return "", err
+	}
+
+	_, err = nk.StorageWrite(ctx, []*runtime.StorageWrite{
+		{
+			Collection:      "user_meta",
+			Key:             "leaderboard_initialized",
+			UserID:          userID,
+			Value:           string(jsonValue),
+			PermissionRead:  1,
+			PermissionWrite: 0,
+		},
+	})
+	if err != nil {
+		logger.Error("Storage write failed: %v", err)
+		return "", err
+	}
+
+	return "initialized", nil
 }

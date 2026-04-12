@@ -8,9 +8,8 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 )
 
-type CreateMatchRequest struct {
-	Name string `json:"name"`
-	Size int    `json:"size"`
+type MatchRequest struct {
+	Mode string `json:"mode"`
 }
 
 func TicTacToeGame(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) (runtime.Match, error) {
@@ -18,108 +17,60 @@ func TicTacToeGame(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 }
 
 func CreateMatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	var req CreateMatchRequest
-	if err := json.Unmarshal([]byte(payload), &req); err != nil {
-		return "", runtime.NewError("invalid payload", 3)
+	var req MatchRequest
+	_ = json.Unmarshal([]byte(payload), &req)
+	if req.Mode == "" {
+		req.Mode = "classic"
 	}
 
-	if req.Size < 3 {
-		req.Size = 3
-	}
-
-	params := map[string]interface{}{
-		"name": req.Name,
-		"size": req.Size,
-	}
-
+	params := map[string]interface{}{"mode": req.Mode}
 	matchID, err := nk.MatchCreate(ctx, "tic_tac_toe", params)
 	if err != nil {
-		logger.Error("MatchCreate error: %v", err)
-		return "", runtime.NewError("could not create match", 13)
+		return "", runtime.NewError("failed to create", 13)
 	}
 
-	response, _ := json.Marshal(map[string]string{"match_id": matchID})
-	return string(response), nil
+	res, _ := json.Marshal(map[string]string{"match_id": matchID})
+	return string(res), nil
 }
 
 func FindMatch(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	limit := 10
-	isAuthoritative := true
-	labelFilter := ""
-	minSize := 0
-	maxSize := 1
+	var req MatchRequest
+	_ = json.Unmarshal([]byte(payload), &req)
+	if req.Mode == "" {
+		req.Mode = "classic"
+	}
 
-	matches, err := nk.MatchList(ctx, limit, isAuthoritative, labelFilter, &minSize, &maxSize, "")
+	limit, authoritative, label := 10, true, "+label.mode:"+req.Mode
+	min, max := 1, 1
+
+	matches, err := nk.MatchList(ctx, limit, authoritative, label, &min, &max, "")
 	if err != nil {
 		return "", err
 	}
 
 	if len(matches) > 0 {
-		response, _ := json.Marshal(map[string]string{"match_id": matches[0].MatchId})
-		return string(response), nil
+		res, _ := json.Marshal(map[string]string{"match_id": matches[0].MatchId})
+		return string(res), nil
 	}
 
-	return CreateMatch(ctx, logger, db, nk, `{"name": "Quick Match", "size": 3}`)
-}
-
-func ListLiveMatches(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	limit := 50
-	matches, err := nk.MatchList(ctx, limit, true, "", nil, nil, "")
-	if err != nil {
-		return "", err
-	}
-
-	response, _ := json.Marshal(matches)
-	return string(response), nil
+	return CreateMatch(ctx, logger, db, nk, payload)
 }
 
 func GetLeaderboard(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	id := "tic_tac_toe_global"
-	ownerIds := []string{}
-	limit := 10
-	cursor := ""
-
-	records, _, _, _, err := nk.LeaderboardRecordsList(ctx, id, ownerIds, limit, cursor, 0)
+	records, _, _, _, err := nk.LeaderboardRecordsList(ctx, "tic_tac_toe_global", []string{}, 10, "", 0)
 	if err != nil {
 		return "", err
 	}
 
-	response, _ := json.Marshal(records)
-	return string(response), nil
+	res, _ := json.Marshal(map[string]interface{}{"records": records})
+	return string(res), nil
 }
 
-func ResetPassword(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload interface{}) (string, error) {
-	// 1. Cast the interface to a map (this is what Nakama produces from JSON)
-	payloadMap, ok := payload.(map[string]interface{})
-	if !ok {
-		logger.Error("Expected payload to be an object, but got: %v", payload)
-		return "", runtime.NewError("invalid payload", 3)
-	}
-
-	// 2. Extract values from the map
-	email, _ := payloadMap["email"].(string)
-	password, _ := payloadMap["password"].(string)
-
-	if email == "" || password == "" {
-		return "", runtime.NewError("email and password required", 3)
-	}
-
-	// 3. Database lookup
-	query := "SELECT id FROM users WHERE email = $1"
-	var userID string
-	err := db.QueryRowContext(ctx, query, email).Scan(&userID)
+func ListLiveMatches(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
+	matches, err := nk.MatchList(ctx, 50, true, "", nil, nil, "")
 	if err != nil {
-		return "", runtime.NewError("user email not found", 5)
+		return "", err
 	}
-
-	// 4. Update credentials
-	err = nk.LinkEmail(ctx, userID, email, password)
-	if err != nil {
-		logger.Error("LinkEmail error: %v", err)
-		return "", runtime.NewError("could not update credentials", 13)
-	}
-
-	logger.Info("Password updated for user: %v", email)
-	res, _ := json.Marshal(map[string]bool{"success": true})
+	res, _ := json.Marshal(matches)
 	return string(res), nil
 }

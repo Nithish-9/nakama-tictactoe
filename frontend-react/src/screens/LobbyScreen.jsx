@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import ProfileCard from "../components/lobby/ProfileCard.jsx";
-import GameConfig  from "../components/lobby/GameConfig.jsx";
+import GameConfig from "../components/lobby/GameConfig.jsx";
 import {
   connectSocket, getSocket, findMatch, cancelMatchmaking,
   createMatch, joinMatch, getAccount, getLeaderboard, clearSession,
@@ -15,11 +15,13 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
   const [statusMsg,   setStatusMsg]   = useState("");
   const [account,     setAccount]     = useState(null);
   const [leaderboard, setLeaderboard] = useState([]);
-  const [tab,         setTab]         = useState("play"); // "play" | "board"
+  const [tab,         setTab]         = useState("play");
   const [roomId,      setRoomId]      = useState("");
-  const mmTimeoutRef = useRef(null);
 
-  // ── Bootstrap ───────────────────────────────────────────────────────────────
+  const mmTimeoutRef = useRef(null);
+  const mmTicketRef  = useRef(null); // ref mirror of mmTicket for stale-closure-safe cleanup
+
+  // ── Bootstrap socket + data ───────────────────────────────────────────────
   useEffect(() => {
     let mounted = true;
 
@@ -28,20 +30,25 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
         const sock = await connectSocket(session);
         if (!mounted) return;
 
-        // Matchmaker matched event
+        // ── Matchmaker matched ──────────────────────────────────────────────
         sock.onmatchmakermatched = async (matched) => {
+          console.log("RAW MATCHED:", JSON.stringify(matched));
+          console.log("MY SESSION USER_ID:", session.user_id);
           clearTimeout(mmTimeoutRef.current);
           setMatchmaking(false);
           setStatusMsg("Match found! Joining…");
+
           try {
+            // matched.users is always fully populated; don't rely on joinedMatch.presences
+            const sorted  = [...matched.users].sort((a, b) =>
+              a.presence.user_id.localeCompare(b.presence.user_id)
+            );
+            const myIdx    = sorted.findIndex(p => p.presence.user_id === session.user_id);
+            const mySymbol = myIdx === 0 ? "X" : "O";
+            const opponent = matched.users.find(p => p.presence.user_id !== session.user_id);
+
             const joinedMatch = await sock.joinMatch(matched.match_id ?? null, matched.token);
-            // Determine symbol: first player is X
-            const presences = joinedMatch.presences ?? [];
-            const sorted    = [...presences].sort((a, b) => a.user_id.localeCompare(b.user_id));
-            const myIdx     = sorted.findIndex(p => p.user_id === session.user_id);
-            const mySymbol  = myIdx === 0 ? "X" : "O";
-            const opponent  = presences.find(p => p.user_id !== session.user_id);
-            onMatchFound(joinedMatch, mySymbol, opponent?.username ?? "Opponent");
+            onMatchFound(joinedMatch, mySymbol, opponent?.presence.username ?? "Opponent");
           } catch (err) {
             console.error("Join match failed", err);
             setStatusMsg("Failed to join match.");
@@ -52,14 +59,16 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
         setSocket(sock);
         setSocketReady(true);
 
-        // Fetch account + leaderboard in parallel
         const [acct, lb] = await Promise.allSettled([
           getAccount(session),
           getLeaderboard(session, 10),
         ]);
         if (mounted) {
           if (acct.status === "fulfilled") setAccount(acct.value);
-          if (lb.status === "fulfilled")   setLeaderboard(lb.value?.records ?? []);
+          if (lb.status  === "fulfilled") {
+            const records = lb.value?.records ?? [];
+            setLeaderboard(records);
+          }
         }
       } catch (err) {
         console.error("Socket connect failed", err);
@@ -68,10 +77,19 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
     }
 
     bootstrap();
-    return () => { mounted = false; };
+
+    return () => {
+      mounted = false;
+      clearTimeout(mmTimeoutRef.current);
+      // Cancel in-flight matchmaking ticket on unmount (use ref to avoid stale closure)
+      if (mmTicketRef.current) {
+        cancelMatchmaking(getSocket(), mmTicketRef.current).catch(() => {});
+        mmTicketRef.current = null;
+      }
+    };
   }, [session]);
 
-  // ── Matchmaking ─────────────────────────────────────────────────────────────
+  // ── Matchmaking ───────────────────────────────────────────────────────────
   async function handleFindMatch(mode) {
     if (!socketReady) return;
     setMatchmaking(true);
@@ -79,8 +97,8 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
     try {
       const ticket = await findMatch(getSocket(), mode);
       setMmTicket(ticket);
+      mmTicketRef.current = ticket; // keep ref in sync
 
-      // Auto-cancel after 60s
       mmTimeoutRef.current = setTimeout(() => {
         handleCancelMM();
         setStatusMsg("No opponent found. Try again.");
@@ -95,30 +113,32 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
   async function handleCancelMM() {
     setMatchmaking(false);
     clearTimeout(mmTimeoutRef.current);
-    if (mmTicket) {
-      try { await cancelMatchmaking(getSocket(), mmTicket); } catch { /* ok */ }
+    const ticket = mmTicketRef.current;
+    if (ticket) {
+      try { await cancelMatchmaking(getSocket(), ticket); } catch { /* ok */ }
       setMmTicket(null);
+      mmTicketRef.current = null;
     }
     setStatusMsg("");
   }
 
-  // ── Private room ─────────────────────────────────────────────────────────────
+  // ── Private room ──────────────────────────────────────────────────────────
   async function handleCreateRoom() {
     if (!socketReady) return;
     setStatusMsg("Creating room…");
     try {
       const m = await createMatch(getSocket());
+
+      // Join as host FIRST, then wait for opponent presence
+      const joinedMatch = await joinMatch(getSocket(), m.match_id);
       setRoomId(m.match_id);
-      setStatusMsg(`Room created! Share ID: ${m.match_id.slice(0,8)}…`);
-      // Listen for second player joining via socket presence events
-      getSocket().onmatchpresence = async (presence) => {
-        if (presence.joins?.length > 0) {
-          const opp = presence.joins.find(p => p.user_id !== session.user_id);
-          if (opp) {
-            setStatusMsg("Opponent joined!");
-            const joinedMatch = await joinMatch(getSocket(), m.match_id);
-            onMatchFound(joinedMatch, "X", opp.username ?? "Opponent");
-          }
+      setStatusMsg(`Room created! Share ID: ${m.match_id.slice(0, 8)}…`);
+
+      getSocket().onmatchpresence = (presence) => {
+        const opp = presence.joins?.find(p => p.user_id !== session.user_id);
+        if (opp) {
+          getSocket().onmatchpresence = null; // cleanup listener
+          onMatchFound(joinedMatch, "X", opp.username ?? "Opponent");
         }
       };
     } catch (err) {
@@ -133,30 +153,28 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
     try {
       const joinedMatch = await joinMatch(getSocket(), id);
       const presences   = joinedMatch.presences ?? [];
-      const sorted      = [...presences].sort((a,b) => a.user_id.localeCompare(b.user_id));
-      const myIdx       = sorted.findIndex(p => p.user_id === session.user_id);
-      const mySymbol    = myIdx === 0 ? "X" : "O";
       const opp         = presences.find(p => p.user_id !== session.user_id);
-      onMatchFound(joinedMatch, mySymbol, opp?.username ?? "Opponent");
+      // Joiner is always "O"; the creator who called handleCreateRoom is "X"
+      onMatchFound(joinedMatch, "O", opp?.username ?? "Opponent");
     } catch (err) {
       console.error(err);
       setStatusMsg("Could not join room. Check the ID.");
     }
   }
 
-  // ── Logout ───────────────────────────────────────────────────────────────────
+  // ── Logout ────────────────────────────────────────────────────────────────
   function handleLogout() {
     clearSession();
     onLogout();
   }
 
-  // ── Stats ─────────────────────────────────────────────────────────────────────
-  const meta   = account?.user;
-  const wallet = account?.wallet ? JSON.parse(account.wallet) : {};
-  const wins   = wallet.wins   ?? 0;
-  const losses = wallet.losses ?? 0;
-  const streak = wallet.streak ?? 0;
+  // ── Derived stats ─────────────────────────────────────────────────────────
+  const wallet  = account?.wallet ? JSON.parse(account.wallet) : {};
+  const wins    = wallet.wins   ?? 0;
+  const losses  = wallet.losses ?? 0;
+  const streak  = wallet.streak ?? 0;
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="lobby-screen">
       {/* Top bar */}
@@ -188,10 +206,16 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
 
           {/* Tab switcher */}
           <div className="tab-bar glass">
-            <button className={`tab-btn ${tab === "play" ? "active" : ""}`} onClick={() => setTab("play")}>
+            <button
+              className={`tab-btn ${tab === "play" ? "active" : ""}`}
+              onClick={() => setTab("play")}
+            >
               ⬡ Play
             </button>
-            <button className={`tab-btn ${tab === "board" ? "active" : ""}`} onClick={() => setTab("board")}>
+            <button
+              className={`tab-btn ${tab === "board" ? "active" : ""}`}
+              onClick={() => setTab("board")}
+            >
               🏆 Leaderboard
             </button>
           </div>
@@ -210,7 +234,7 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
           )}
         </aside>
 
-        {/* Right panel: status/waiting */}
+        {/* Right panel */}
         <main className="lobby-main animate-fade-up" style={{ animationDelay: "0.15s" }}>
           {!matchmaking && (
             <div className="lobby-hero">
@@ -221,7 +245,9 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
                   </div>
                 ))}
               </div>
-              <h2 className="hero-headline">Ready to<br/><span className="text-cyan glow-cyan">Dominate?</span></h2>
+              <h2 className="hero-headline">
+                Ready to<br /><span className="text-cyan glow-cyan">Dominate?</span>
+              </h2>
               <p className="hero-sub text-dim">
                 Server-authoritative multiplayer · Built on Nakama
               </p>
@@ -230,11 +256,13 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
                   {statusMsg}
                   {roomId && (
                     <div className="room-id-display">
-                      <code>{roomId.slice(0,16)}…</code>
+                      <code>{roomId.slice(0, 16)}…</code>
                       <button
                         className="btn btn-ghost copy-small"
                         onClick={() => navigator.clipboard.writeText(roomId)}
-                      >Copy</button>
+                      >
+                        Copy
+                      </button>
                     </div>
                   )}
                 </div>
@@ -251,7 +279,7 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
   );
 }
 
-/* ── Matchmaking waiting state ─────────────────────────────────────────────── */
+/* ── Matchmaking waiting ───────────────────────────────────────────────────── */
 function MatchmakingWaiting({ onCancel, statusMsg }) {
   const [dots, setDots] = useState(".");
   useEffect(() => {
@@ -265,32 +293,39 @@ function MatchmakingWaiting({ onCancel, statusMsg }) {
         <div className="mm-ring-inner" />
         <span className="mm-vs-text">VS</span>
       </div>
-      <h3 className="mm-title">{statusMsg || "Finding opponent"}<span className="dots">{dots}</span></h3>
+      <h3 className="mm-title">
+        {statusMsg || "Finding opponent"}<span className="dots">{dots}</span>
+      </h3>
       <p className="text-dim mm-sub">This usually takes under 30 seconds</p>
       <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
     </div>
   );
 }
 
-/* ── Leaderboard panel ─────────────────────────────────────────────────────── */
+/* ── Leaderboard panel ────────────────────────────────────────────────────── */
 function LeaderboardPanel({ records, myUserId }) {
   if (!records || records.length === 0) {
     return (
       <div className="lb-empty glass-2">
-        <span className="text-dim" style={{ fontSize: "0.85rem" }}>No records yet. Play some games!</span>
+        <span className="text-dim" style={{ fontSize: "0.85rem" }}>
+          No records yet. Play some games!
+        </span>
       </div>
     );
   }
 
-  const medals = ["🥇","🥈","🥉"];
+  const medals = ["🥇", "🥈", "🥉"];
 
   return (
     <div className="lb-panel glass-2">
       <h3 className="lb-title">Global Leaderboard</h3>
       <div className="lb-list">
         {records.map((rec, i) => (
-          <div key={rec.owner_id} className={`lb-row ${rec.owner_id === myUserId ? "lb-me" : ""}`}>
-            <span className="lb-rank">{medals[i] || `#${i+1}`}</span>
+          <div
+            key={rec.owner_id}
+            className={`lb-row ${rec.owner_id === myUserId ? "lb-me" : ""}`}
+          >
+            <span className="lb-rank">{medals[i] || `#${i + 1}`}</span>
             <span className="lb-name">{rec.username || "Anonymous"}</span>
             <span className="lb-score text-cyan">{rec.score}</span>
           </div>

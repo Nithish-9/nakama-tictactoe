@@ -2,7 +2,13 @@ import React, { useState, useEffect } from "react";
 import AuthScreen  from "./screens/AuthScreen.jsx";
 import LobbyScreen from "./screens/LobbyScreen.jsx";
 import TicTacToe   from "./components/game/TicTacToe.jsx";
-import { restoreSession, getSocket, disconnectSocket, writeLeaderboardScore } from "./api/nakama.js";
+import {
+  restoreSession, 
+  getSocket, 
+  connectSocket, 
+  disconnectSocket, 
+  writeLeaderboardScore 
+} from "./api/nakama.js";
 import "./index.css";
 
 const SCREEN = {
@@ -27,7 +33,27 @@ export default function App() {
         const storedName = localStorage.getItem("username") || "Player";
         setSession(saved);
         setUsername(storedName);
-        setScreen(SCREEN.LOBBY);
+
+        try {
+          await connectSocket(saved);
+
+          // 2. Check if there was an ongoing match
+          const lastMatchId = localStorage.getItem("active_match_id");
+          const lastSymbol = localStorage.getItem("my_symbol") || "X";
+          const lastOpponent = localStorage.getItem("opponent_name") || "Opponent";
+          
+          if (lastMatchId) {
+            setMatch({ match_id: lastMatchId });
+            setMySymbol(lastSymbol);
+            setOpponentName(lastOpponent);
+            setScreen(SCREEN.GAME);
+          } else {
+            setScreen(SCREEN.LOBBY);
+          }
+        } catch (err) {
+          console.error("Socket restoration failed", err);
+          setScreen(SCREEN.LOBBY);
+        }
       } else {
         setScreen(SCREEN.AUTH);
       }
@@ -39,10 +65,17 @@ export default function App() {
     localStorage.setItem("username", uname);
     setSession(sess);
     setUsername(uname);
-    setScreen(SCREEN.LOBBY);
+    connectSocket(sess).then(() => {
+      setScreen(SCREEN.LOBBY);
+    });
   }
 
   function handleMatchFound(joinedMatch, symbol, oppName) {
+
+    localStorage.setItem("active_match_id", joinedMatch.match_id);
+    localStorage.setItem("my_symbol", symbol);
+    localStorage.setItem("opponent_name", oppName);
+
     setMatch(joinedMatch);
     setMySymbol(symbol);
     setOpponentName(oppName);
@@ -50,6 +83,11 @@ export default function App() {
   }
 
   async function handleGameEnd(result) {
+
+    localStorage.removeItem("active_match_id");
+    localStorage.removeItem("my_symbol");
+    localStorage.removeItem("opponent_name");
+
     if (result && result.winner && result.winner !== "draw") {
       try {
         const delta = result.winner === mySymbol ? 1 : 0;
@@ -63,6 +101,7 @@ export default function App() {
   async function handleLogout() {
     await disconnectSocket();
     localStorage.removeItem("username");
+    localStorage.removeItem("active_match_id");
     setSession(null);
     setUsername("");
     setScreen(SCREEN.AUTH);
@@ -70,22 +109,22 @@ export default function App() {
 
   if (screen === SCREEN.LOADING) {
     return (
-      <div style={{
+      <div className="loading-container" style={{
         minHeight: "100vh",
-        display:   "flex",
+        display: "flex",
         alignItems: "center",
         justifyContent: "center",
       }}>
         <div style={{ textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
-          <div style={{
+          <div className="loader-spinner" style={{
             width: 48, height: 48,
             border: "3px solid rgba(0,212,255,0.2)",
-            borderTopColor: "var(--cyan)",
+            borderTopColor: "cyan",
             borderRadius: "50%",
             animation: "spin 0.8s linear infinite",
           }} />
-          <p style={{ fontFamily: "var(--font-display)", fontSize: "0.7rem", letterSpacing: "0.2em", color: "rgba(160,180,220,0.5)" }}>
-            LOADING…
+          <p style={{ letterSpacing: "0.2em", color: "rgba(160,180,220,0.5)", fontSize: "0.8rem" }}>
+            RECONNECTING…
           </p>
         </div>
       </div>

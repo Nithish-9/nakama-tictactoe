@@ -1,9 +1,10 @@
 import { Client } from "@heroiclabs/nakama-js";
+import { Session } from "@heroiclabs/nakama-js";
 
 const NAKAMA_HOST = import.meta.env.VITE_NAKAMA_HOST || "127.0.0.1";
 const NAKAMA_PORT = import.meta.env.VITE_NAKAMA_PORT || "7350";
-const NAKAMA_KEY  = import.meta.env.VITE_NAKAMA_KEY  || "defaultkey";
-const USE_SSL     = import.meta.env.VITE_NAKAMA_SSL  === "true";
+const NAKAMA_KEY = import.meta.env.VITE_NAKAMA_KEY || "defaultkey";
+const USE_SSL = import.meta.env.VITE_NAKAMA_SSL === "true";
 
 export const client = new Client(NAKAMA_KEY, NAKAMA_HOST, NAKAMA_PORT, USE_SSL);
 
@@ -11,9 +12,9 @@ const SESSION_KEY = "nakama_session";
 
 export function saveSession(session) {
   localStorage.setItem(SESSION_KEY, JSON.stringify({
-    token:        session.token,
+    token: session.token,
     refresh_token: session.refresh_token,
-    created_at:   Date.now(),
+    created_at: Date.now(),
   }));
 }
 
@@ -33,10 +34,10 @@ export function clearSession() {
 
 
 export async function authenticateDevice(deviceId, username) {
+  let session;
+  
   try {
-    const session = await client.authenticateDevice(deviceId, true, username);
-    saveSession(session);
-    return session;
+    session = await client.authenticateDevice(deviceId, true, username);
   } catch (err) {
     const isAlreadyExists =
       err?.code === 6 ||
@@ -45,28 +46,37 @@ export async function authenticateDevice(deviceId, username) {
 
     if (!isAlreadyExists) throw err;
 
-    const session = await client.authenticateDevice(deviceId, false);
-    saveSession(session);
+    session = await client.authenticateDevice(deviceId, false);
+
     try {
       await client.updateAccount(session, {
-        username:     username,
+        username: username,
         display_name: username,
       });
     } catch {
-      // Non-critical — keep existing account name if update fails
+      // ignore
     }
-
-    return session;
   }
+
+  saveSession(session);
+
+  try {
+    await client.rpc(session, "add_user_to_leaderboard", {});
+  } catch (err) {
+    console.log("Leaderboard init failed:", err);
+  }
+
+  return session;
 }
 
 export async function restoreSession() {
   const saved = loadSession();
   if (!saved) return null;
   try {
-    const session = await client.sessionRefresh(saved.refresh_token);
-    saveSession(session);
-    return session;
+    const restoredSession = Session.restore(saved.token, saved.refresh_token);
+    const newSession = await client.sessionRefresh(restoredSession);
+    saveSession(newSession);
+    return newSession;
   } catch {
     clearSession();
     return null;
@@ -76,9 +86,11 @@ export async function restoreSession() {
 let _socket = null;
 
 export async function connectSocket(session) {
+  console.log('Inital no socket :' + JSON.stringify(session))
   if (_socket) return _socket;
-  _socket = client.createSocket(USE_SSL, false);
+  _socket = client.createSocket(USE_SSL, true);
   await _socket.connect(session, true);
+  console.log(_socket)
   return _socket;
 }
 
@@ -102,7 +114,7 @@ export async function updateAccount(session, { username, displayName, avatarUrl 
 }
 
 export async function findMatch(socket, mode = "classic") {
-  const ticket = await socket.addMatchmaker("*", 2, 2, { mode: { string_value: mode } });
+  const ticket = await socket.addMatchmaker("*", 2, 2, {mode});
   return ticket;
 }
 
@@ -123,11 +135,11 @@ export async function leaveMatch(socket, matchId) {
 }
 
 export async function getLeaderboard(session, limit = 10) {
-  return await client.listLeaderboardRecords(session, "tictactoe_wins", [], limit);
+  return await client.listLeaderboardRecords(session, "tic_tac_toe_global", [], limit);
 }
 
 export async function writeLeaderboardScore(session, score) {
-  return await client.writeLeaderboardRecord(session, "tictactoe_wins", score);
+  return await client.writeLeaderboardRecord(session, "tic_tac_toe_global", score);
 }
 
 export async function rpcCall(session, id, payload = {}) {
@@ -135,9 +147,9 @@ export async function rpcCall(session, id, payload = {}) {
 }
 
 export const OpCode = {
-  MOVE:        1,
-  GAME_STATE:  2,
-  GAME_OVER:   3,
+  MOVE: 1,
+  GAME_STATE: 2,
+  GAME_OVER: 3,
   PLAYER_READY: 4,
-  TIMER_TICK:  5,
+  TIMER_TICK: 5,
 };

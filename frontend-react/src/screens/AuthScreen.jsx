@@ -18,8 +18,8 @@ export default function AuthScreen({ onAuth }) {
   async function handleSubmit(e) {
     e.preventDefault();
     const trimmed = username.trim();
-    if (!trimmed || trimmed.length < 2) {
-      setError("Name must be at least 2 characters");
+    if (!trimmed || trimmed.length < 5) {
+      setError("Name must be at least 5 characters");
       return;
     }
     setLoading(true);
@@ -28,9 +28,6 @@ export default function AuthScreen({ onAuth }) {
       const deviceId = generateDeviceId();
       const session  = await authenticateDevice(deviceId, trimmed);
 
-      // Always pass the typed name — authenticateDevice already called
-      // updateAccount({ username, display_name }) so the server is in sync.
-      // session.username is a JWT snapshot and may not reflect the rename yet.
       onAuth(session, trimmed);
     } catch (err) {
       console.error(err);
@@ -42,7 +39,6 @@ export default function AuthScreen({ onAuth }) {
 
   return (
     <div className="auth-screen">
-      {/* Stars background */}
       <div className="stars" aria-hidden="true">
         {[...Array(60)].map((_, i) => (
           <span key={i} className="star" style={{
@@ -57,7 +53,6 @@ export default function AuthScreen({ onAuth }) {
       </div>
 
       <div className="auth-card glass-3 animate-fade-up">
-        {/* Logo mark */}
         <div className="auth-logo">
           <div className="logo-grid">
             {["X","","O","","X","","O","","X"].map((s, i) => (
