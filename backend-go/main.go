@@ -36,6 +36,11 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 		return err
 	}
 
+	if err := initializer.RegisterRpc("reset_password", core.ResetPassword); err != nil {
+		logger.Error("Failed to register get_leaderboard RPC: %v", err)
+		return err
+	}
+
 	logger.Info("Tic-Tac-Toe module initialized successfully")
 	return nil
 }

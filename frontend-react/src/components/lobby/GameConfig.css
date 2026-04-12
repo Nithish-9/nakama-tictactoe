@@ -1,0 +1,122 @@
+.game-config {
+  border-radius: var(--r-lg);
+  padding: 28px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.config-title {
+  font-family: var(--font-display);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: rgba(160, 180, 220, 0.7);
+}
+
+/* Mode grid */
+.mode-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.mode-card {
+  position: relative;
+  background: rgba(10, 15, 40, 0.5);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 16px 14px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+
+.mode-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(var(--accent-rgb, 0,212,255), 0.08) 0%, transparent 70%);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.mode-card:hover { border-color: var(--border-hi); transform: translateY(-2px); }
+.mode-card:hover::before { opacity: 1; }
+
+.mode-card.active {
+  border-color: var(--accent);
+  background: rgba(10, 15, 40, 0.7);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--accent) 25%, transparent),
+              inset 0 1px 0 rgba(255,255,255,0.06);
+}
+.mode-card.active::before { opacity: 1; }
+
+.mode-icon { font-size: 1.4rem; line-height: 1; }
+.mode-label {
+  font-family: var(--font-display);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+.mode-desc { font-size: 0.72rem; line-height: 1.3; }
+
+.mode-check {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--ink);
+  font-size: 0.6rem;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Actions */
+.config-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.config-btn {
+  width: 100%;
+  text-align: center;
+}
+
+/* Join row */
+.join-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.join-row .btn {
+  width: 100%;
+}
+
+.join-err {
+  font-size: 0.8rem;
+  color: var(--pink);
+}
+
+/* spinner reuse */
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(0,0,0,0.25);
+  border-top-color: var(--ink);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}

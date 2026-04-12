@@ -87,3 +87,39 @@ func GetLeaderboard(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 	response, _ := json.Marshal(records)
 	return string(response), nil
 }
+
+func ResetPassword(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload interface{}) (string, error) {
+	// 1. Cast the interface to a map (this is what Nakama produces from JSON)
+	payloadMap, ok := payload.(map[string]interface{})
+	if !ok {
+		logger.Error("Expected payload to be an object, but got: %v", payload)
+		return "", runtime.NewError("invalid payload", 3)
+	}
+
+	// 2. Extract values from the map
+	email, _ := payloadMap["email"].(string)
+	password, _ := payloadMap["password"].(string)
+
+	if email == "" || password == "" {
+		return "", runtime.NewError("email and password required", 3)
+	}
+
+	// 3. Database lookup
+	query := "SELECT id FROM users WHERE email = $1"
+	var userID string
+	err := db.QueryRowContext(ctx, query, email).Scan(&userID)
+	if err != nil {
+		return "", runtime.NewError("user email not found", 5)
+	}
+
+	// 4. Update credentials
+	err = nk.LinkEmail(ctx, userID, email, password)
+	if err != nil {
+		logger.Error("LinkEmail error: %v", err)
+		return "", runtime.NewError("could not update credentials", 13)
+	}
+
+	logger.Info("Password updated for user: %v", email)
+	res, _ := json.Marshal(map[string]bool{"success": true})
+	return string(res), nil
+}
