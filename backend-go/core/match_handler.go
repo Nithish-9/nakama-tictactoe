@@ -12,13 +12,18 @@ import (
 // MatchState defines the internal state of a game session.
 type MatchState struct {
 	Board     []string          `json:"board"`
-	Marks     map[string]string `json:"marks"` // UserID -> "X" or "O"
-	Turn      string            `json:"turn"`  // Current UserID
+	Marks     map[string]string `json:"marks"`
+	Turn      string            `json:"turn"`
 	MoveCount int               `json:"move_count"`
 	GameOver  bool              `json:"game_over"`
 	Winner    string            `json:"winner"`
 	Mode      string            `json:"mode"`
+	// Reconnect grace period
+	DisconnectedUser string `json:"disconnected_user"` // userID who left
+	DisconnectTick   int64  `json:"disconnect_tick"`   // tick when they left
 }
+
+const ReconnectGraceTicks = 30
 
 type TicTacToeMatch struct{}
 
@@ -51,15 +56,23 @@ func (m *TicTacToeMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Lo
 func (m *TicTacToeMatch) MatchJoin(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, presences []runtime.Presence) interface{} {
 	s := state.(*MatchState)
 	for _, p := range presences {
-		if len(s.Marks) == 0 {
-			s.Marks[p.GetUserId()] = "X"
-			s.Turn = p.GetUserId()
-		} else {
-			s.Marks[p.GetUserId()] = "O"
+		if len(s.Marks) < 2 {
+			if len(s.Marks) == 0 {
+				s.Marks[p.GetUserId()] = "X"
+				s.Turn = p.GetUserId()
+			} else {
+				s.Marks[p.GetUserId()] = "O"
+			}
+		}
+		// Player reconnected — clear grace period
+		if p.GetUserId() == s.DisconnectedUser {
+			logger.Info("Player reconnected: %s", p.GetUserId())
+			s.DisconnectedUser = ""
+			s.DisconnectTick = 0
 		}
 	}
 
-	if len(s.Marks) == 2 {
+	if len(s.Marks) == 2 && !s.GameOver {
 		BroadcastState(dispatcher, s, 2)
 	}
 	return s
@@ -67,6 +80,23 @@ func (m *TicTacToeMatch) MatchJoin(ctx context.Context, logger runtime.Logger, d
 
 func (m *TicTacToeMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, messages []runtime.MatchData) interface{} {
 	s := state.(*MatchState)
+
+	// Check grace period expiry
+	if s.DisconnectedUser != "" && !s.GameOver {
+		if tick-s.DisconnectTick >= ReconnectGraceTicks {
+			logger.Info("Grace period expired, ending match. Disconnected: %s", s.DisconnectedUser)
+			s.GameOver = true
+			// Remaining player wins
+			for id := range s.Marks {
+				if id != s.DisconnectedUser {
+					s.Winner = id
+					break
+				}
+			}
+			BroadcastState(dispatcher, s, 3)
+			return s
+		}
+	}
 
 	for _, msg := range messages {
 		if msg.GetOpCode() == 1 {
@@ -110,8 +140,10 @@ func (m *TicTacToeMatch) MatchLoop(ctx context.Context, logger runtime.Logger, d
 func (m *TicTacToeMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, presences []runtime.Presence) interface{} {
 	s := state.(*MatchState)
 	if !s.GameOver && len(presences) > 0 {
-		s.GameOver = true
-		BroadcastState(dispatcher, s, 2)
+		// Start grace period instead of ending immediately
+		s.DisconnectedUser = presences[0].GetUserId()
+		s.DisconnectTick = tick
+		logger.Info("Player disconnected, starting grace period: %s", s.DisconnectedUser)
 	}
 	return s
 }
@@ -185,7 +217,28 @@ func CheckWinner(board []string, size int, lastMoveIndex int) string {
 }
 
 func BroadcastState(dispatcher runtime.MatchDispatcher, state *MatchState, opCode int64) {
-	data, _ := json.Marshal(state)
+	type ClientState struct {
+		Board       []string `json:"board"`
+		CurrentTurn string   `json:"currentTurn"` // "X" or "O"
+		GameOver    bool     `json:"game_over"`
+		Winner      string   `json:"winner"` // "X", "O", or "draw"
+	}
+
+	turnSymbol := state.Marks[state.Turn] // userID → "X"/"O"
+
+	winnerSymbol := state.Winner
+	if winnerSymbol != "" && winnerSymbol != "draw" {
+		winnerSymbol = state.Marks[state.Winner] // userID → "X"/"O"
+	}
+
+	clientState := ClientState{
+		Board:       state.Board,
+		CurrentTurn: turnSymbol,
+		GameOver:    state.GameOver,
+		Winner:      winnerSymbol,
+	}
+
+	data, _ := json.Marshal(clientState)
 	dispatcher.BroadcastMessage(opCode, data, nil, nil, true)
 }
 

@@ -19,7 +19,7 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
   const [roomId,      setRoomId]      = useState("");
 
   const mmTimeoutRef = useRef(null);
-  const mmTicketRef  = useRef(null); // ref mirror of mmTicket for stale-closure-safe cleanup
+  const mmTicketRef  = useRef(null);
 
   // ── Bootstrap socket + data ───────────────────────────────────────────────
   useEffect(() => {
@@ -30,17 +30,13 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
         const sock = await connectSocket(session);
         if (!mounted) return;
 
-        // ── Matchmaker matched ──────────────────────────────────────────────
         sock.onmatchmakermatched = async (matched) => {
-          console.log("RAW MATCHED:", JSON.stringify(matched));
-          console.log("MY SESSION USER_ID:", session.user_id);
           clearTimeout(mmTimeoutRef.current);
           setMatchmaking(false);
           setStatusMsg("Match found! Joining…");
 
           try {
-            // matched.users is always fully populated; don't rely on joinedMatch.presences
-            const sorted  = [...matched.users].sort((a, b) =>
+            const sorted   = [...matched.users].sort((a, b) =>
               a.presence.user_id.localeCompare(b.presence.user_id)
             );
             const myIdx    = sorted.findIndex(p => p.presence.user_id === session.user_id);
@@ -48,6 +44,8 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
             const opponent = matched.users.find(p => p.presence.user_id !== session.user_id);
 
             const joinedMatch = await sock.joinMatch(matched.match_id ?? null, matched.token);
+            console.log("matched match : "+ JSON.stringify(matched))
+            console.log("Joined Match : " + JSON.stringify(joinedMatch))
             onMatchFound(joinedMatch, mySymbol, opponent?.presence.username ?? "Opponent");
           } catch (err) {
             console.error("Join match failed", err);
@@ -66,8 +64,7 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
         if (mounted) {
           if (acct.status === "fulfilled") setAccount(acct.value);
           if (lb.status  === "fulfilled") {
-            const records = lb.value?.records ?? [];
-            setLeaderboard(records);
+            setLeaderboard(lb.value?.records ?? []);
           }
         }
       } catch (err) {
@@ -81,7 +78,6 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
     return () => {
       mounted = false;
       clearTimeout(mmTimeoutRef.current);
-      // Cancel in-flight matchmaking ticket on unmount (use ref to avoid stale closure)
       if (mmTicketRef.current) {
         cancelMatchmaking(getSocket(), mmTicketRef.current).catch(() => {});
         mmTicketRef.current = null;
@@ -97,7 +93,7 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
     try {
       const ticket = await findMatch(getSocket(), mode);
       setMmTicket(ticket);
-      mmTicketRef.current = ticket; // keep ref in sync
+      mmTicketRef.current = ticket;
 
       mmTimeoutRef.current = setTimeout(() => {
         handleCancelMM();
@@ -123,13 +119,14 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
   }
 
   // ── Private room ──────────────────────────────────────────────────────────
-  async function handleCreateRoom() {
+  // Requires GameConfig to call onCreateRoom(mode) — update GameConfig:
+  // onClick={() => onCreateRoom(mode)}
+  async function handleCreateRoom(mode = "classic") {
     if (!socketReady) return;
     setStatusMsg("Creating room…");
     try {
-      const m = await createMatch(getSocket());
+      const m = await createMatch(session, mode);
 
-      // Join as host FIRST, then wait for opponent presence
       const joinedMatch = await joinMatch(getSocket(), m.match_id);
       setRoomId(m.match_id);
       setStatusMsg(`Room created! Share ID: ${m.match_id.slice(0, 8)}…`);
@@ -137,7 +134,7 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
       getSocket().onmatchpresence = (presence) => {
         const opp = presence.joins?.find(p => p.user_id !== session.user_id);
         if (opp) {
-          getSocket().onmatchpresence = null; // cleanup listener
+          getSocket().onmatchpresence = null;
           onMatchFound(joinedMatch, "X", opp.username ?? "Opponent");
         }
       };
@@ -154,7 +151,6 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
       const joinedMatch = await joinMatch(getSocket(), id);
       const presences   = joinedMatch.presences ?? [];
       const opp         = presences.find(p => p.user_id !== session.user_id);
-      // Joiner is always "O"; the creator who called handleCreateRoom is "X"
       onMatchFound(joinedMatch, "O", opp?.username ?? "Opponent");
     } catch (err) {
       console.error(err);
@@ -169,10 +165,10 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
   }
 
   // ── Derived stats ─────────────────────────────────────────────────────────
-  const wallet  = account?.wallet ? JSON.parse(account.wallet) : {};
-  const wins    = wallet.wins   ?? 0;
-  const losses  = wallet.losses ?? 0;
-  const streak  = wallet.streak ?? 0;
+  const wallet = account?.wallet ? JSON.parse(account.wallet) : {};
+  const wins   = wallet.wins   ?? 0;
+  const losses = wallet.losses ?? 0;
+  const streak = wallet.streak ?? 0;
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -181,7 +177,7 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
       <header className="lobby-header glass">
         <div className="lobby-logo">
           <span className="logo-x text-cyan">X</span>
-          <span className="logo-title">TACTICX</span>
+          <span className="lobby-title">TACTICX</span>
         </div>
         <div className="header-actions">
           {socketReady
@@ -204,7 +200,6 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
             streak={streak}
           />
 
-          {/* Tab switcher */}
           <div className="tab-bar glass">
             <button
               className={`tab-btn ${tab === "play" ? "active" : ""}`}

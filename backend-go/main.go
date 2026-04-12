@@ -27,6 +27,35 @@ func InitModule(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runti
 		return err
 	}
 
+	if err := initializer.RegisterMatchmakerMatched(func(
+		ctx context.Context,
+		logger runtime.Logger,
+		db *sql.DB,
+		nk runtime.NakamaModule,
+		entries []runtime.MatchmakerEntry,
+	) (string, error) {
+		params := map[string]interface{}{"mode": "classic"}
+
+		if len(entries) > 0 {
+			if props := entries[0].GetProperties(); props != nil {
+				if mode, ok := props["mode"].(string); ok && mode != "" {
+					params["mode"] = mode
+				}
+			}
+		}
+
+		matchID, err := nk.MatchCreate(ctx, "tic_tac_toe", params)
+		if err != nil {
+			logger.Error("MatchmakerMatched: failed to create match: %v", err)
+			return "", err
+		}
+
+		logger.Info("MatchmakerMatched: created authoritative match %s", matchID)
+		return matchID, nil
+	}); err != nil {
+		return err
+	}
+
 	if err := initializer.RegisterRpc("add_user_to_leaderboard", core.AddUserToLeaderboard); err != nil {
 		return err
 	}
