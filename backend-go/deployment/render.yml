@@ -18,4 +18,6 @@ session:
   refresh_token_expiry_sec: 604800
   cors_allowed_origins:
     - "*"
-
+    
+runtime:
+  path: /nakama/data/modules
