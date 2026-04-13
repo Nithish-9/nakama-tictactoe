@@ -60,14 +60,17 @@ Users can skip the public matchmaker by creating a room and sharing its unique M
 
 ## 🚀 Deployment Process
 
+### Automatic Continuous Deployment
+The project is configured for **CI/CD** workflows. Any commit and push to the `main` branch triggers an automatic build and deployment for both the frontend and backend services.
+
 ### Frontend — Vercel
 * **Framework**: React + Vite.
-* **CI/CD**: Auto-deploy on GitHub push.
-* **Environment Variables**: `VITE_NAKAMA_HOST` and `VITE_NAKAMA_PORT` are injected via the Vercel dashboard.
+* **Deployment**: Automatic deployments on push to `main`.
+* **Environment Variables**: `VITE_NAKAMA_HOST`, `VITE_NAKAMA_PORT`, `VITE_NAKAMA_KEY`, and `VITE_NAKAMA_SSL` are managed via the Vercel dashboard.
 
 ### Backend — Render
 * **Runtime**: Dockerized Nakama image with Go modules compiled as a `.so` shared library.
-* **Go Version**: Go 1.21+.
+* **Deployment**: Automatic deployments on push to `main`.
 * **Persistence**: Managed PostgreSQL for leaderboard and account storage.
 
 ---
