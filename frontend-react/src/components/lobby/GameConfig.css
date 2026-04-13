@@ -82,7 +82,6 @@
   justify-content: center;
 }
 
-/* Actions */
 .config-actions {
   display: flex;
   flex-direction: column;
@@ -94,7 +93,6 @@
   text-align: center;
 }
 
-/* Join row */
 .join-row {
   display: flex;
   flex-direction: column;
@@ -110,7 +108,6 @@
   color: var(--pink);
 }
 
-/* spinner reuse */
 .spinner {
   display: inline-block;
   width: 16px;

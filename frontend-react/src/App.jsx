@@ -37,7 +37,6 @@ export default function App() {
         try {
           await connectSocket(saved);
 
-          // 2. Check if there was an ongoing match
           const lastMatchId = localStorage.getItem("active_match_id");
           const lastSymbol = localStorage.getItem("my_symbol") || "X";
           const lastOpponent = localStorage.getItem("opponent_name") || "Opponent";
@@ -92,7 +91,7 @@ export default function App() {
       try {
         const delta = result.winner === mySymbol ? 1 : 0;
         if (delta > 0) await writeLeaderboardScore(session, delta);
-      } catch { /* non-critical */ }
+      } catch {  }
     }
     setMatch(null);
     setScreen(SCREEN.LOBBY);

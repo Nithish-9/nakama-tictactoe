@@ -21,7 +21,6 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
   const mmTimeoutRef = useRef(null);
   const mmTicketRef  = useRef(null);
 
-  // ── Bootstrap socket + data ───────────────────────────────────────────────
   useEffect(() => {
     let mounted = true;
 
@@ -85,7 +84,6 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
     };
   }, [session]);
 
-  // ── Matchmaking ───────────────────────────────────────────────────────────
   async function handleFindMatch(mode) {
     if (!socketReady) return;
     setMatchmaking(true);
@@ -118,9 +116,6 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
     setStatusMsg("");
   }
 
-  // ── Private room ──────────────────────────────────────────────────────────
-  // Requires GameConfig to call onCreateRoom(mode) — update GameConfig:
-  // onClick={() => onCreateRoom(mode)}
   async function handleCreateRoom(mode = "classic") {
     console.log(' handleCreateRoom :' + mode);
     if (!socketReady) return;
@@ -159,22 +154,18 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
     }
   }
 
-  // ── Logout ────────────────────────────────────────────────────────────────
   function handleLogout() {
     clearSession();
     onLogout();
   }
 
-  // ── Derived stats ─────────────────────────────────────────────────────────
   const wallet = account?.wallet ? JSON.parse(account.wallet) : {};
   const wins   = wallet.wins   ?? 0;
   const losses = wallet.losses ?? 0;
   const streak = wallet.streak ?? 0;
 
-  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="lobby-screen">
-      {/* Top bar */}
       <header className="lobby-header glass">
         <div className="lobby-logo">
           <span className="logo-x text-cyan">X</span>
@@ -192,7 +183,6 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
       </header>
 
       <div className="lobby-body">
-        {/* Left panel */}
         <aside className="lobby-left animate-fade-up" style={{ animationDelay: "0.05s" }}>
           <ProfileCard
             username={username}
@@ -230,7 +220,6 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
           )}
         </aside>
 
-        {/* Right panel */}
         <main className="lobby-main animate-fade-up" style={{ animationDelay: "0.15s" }}>
           {!matchmaking && (
             <div className="lobby-hero">
@@ -275,7 +264,6 @@ export default function LobbyScreen({ session, username, onMatchFound, onLogout 
   );
 }
 
-/* ── Matchmaking waiting ───────────────────────────────────────────────────── */
 function MatchmakingWaiting({ onCancel, statusMsg }) {
   const [dots, setDots] = useState(".");
   useEffect(() => {
@@ -298,7 +286,6 @@ function MatchmakingWaiting({ onCancel, statusMsg }) {
   );
 }
 
-/* ── Leaderboard panel ────────────────────────────────────────────────────── */
 function LeaderboardPanel({ records, myUserId }) {
   if (!records || records.length === 0) {
     return (

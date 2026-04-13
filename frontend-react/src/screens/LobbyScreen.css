@@ -5,7 +5,6 @@
   overflow-x: hidden;
 }
 
-/* Header */
 .lobby-header {
   display: flex;
   align-items: center;
@@ -54,7 +53,6 @@
 
 .logout-btn { padding: 7px 14px; font-size: 0.62rem; }
 
-/* Body layout */
 .lobby-body {
   flex: 1;
   display: grid;
@@ -66,10 +64,8 @@
   margin: 0 auto;
 }
 
-/* Left */
 .lobby-left { display: flex; flex-direction: column; gap: 14px; }
 
-/* Tabs */
 .tab-bar {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -99,7 +95,7 @@
 }
 .tab-btn:hover:not(.active) { color: rgba(160,180,220,0.85); }
 
-/* ── Hero ─────────────────────────────────────────────────────────────────── */
+
 .lobby-main {
   display: flex;
   align-items: center;
@@ -115,7 +111,6 @@
   padding: 40px 20px;
 }
 
-/* Floating grid decoration */
 .hero-grid {
   display: grid;
   grid-template-columns: repeat(6, 44px);
@@ -179,7 +174,6 @@
 }
 .copy-small { padding: 4px 10px; font-size: 0.6rem; }
 
-/* ── Matchmaking waiting ──────────────────────────────────────────────────── */
 .mm-waiting {
   display: flex;
   flex-direction: column;
@@ -252,7 +246,6 @@
 .dots { color: var(--cyan); }
 .mm-sub { font-size: 0.82rem; }
 
-/* ── Leaderboard ─────────────────────────────────────────────────────────── */
 .lb-panel {
   border-radius: var(--r-lg);
   padding: 20px;
@@ -295,7 +288,6 @@
   text-align: center;
 }
 
-/* ── Responsive ──────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .lobby-body {
     grid-template-columns: 1fr;

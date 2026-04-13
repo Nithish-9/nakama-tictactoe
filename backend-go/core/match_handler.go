@@ -46,7 +46,6 @@ func (m *TicTacToeMatch) MatchInit(ctx context.Context, logger runtime.Logger, d
 func (m *TicTacToeMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, presence runtime.Presence, metadata map[string]string) (interface{}, bool, string) {
 	s := state.(*MatchState)
 
-	// Always allow rejoining players
 	if _, exists := s.Marks[presence.GetUserId()]; exists {
 		return s, true, ""
 	}
@@ -61,19 +60,16 @@ func (m *TicTacToeMatch) MatchJoin(ctx context.Context, logger runtime.Logger, d
 	s := state.(*MatchState)
 
 	for _, p := range presences {
-		// ── Rejoining player ──────────────────────────────────────────
 		if _, exists := s.Marks[p.GetUserId()]; exists {
 			logger.Info("Player rejoined: %s", p.GetUserId())
 			s.DisconnectedUser = ""
 			s.DisconnectTick = 0
 
-			// Send current state only to rejoining player
 			data, _ := json.Marshal(buildClientState(s))
 			dispatcher.BroadcastMessage(2, data, []runtime.Presence{p}, nil, true)
 			continue
 		}
 
-		// ── New player joining ────────────────────────────────────────
 		if len(s.Marks) < 2 {
 			if len(s.Marks) == 0 {
 				s.Marks[p.GetUserId()] = "X"
@@ -84,7 +80,6 @@ func (m *TicTacToeMatch) MatchJoin(ctx context.Context, logger runtime.Logger, d
 		}
 	}
 
-	// Broadcast to all when match is full
 	if len(s.Marks) == 2 && !s.GameOver {
 		BroadcastState(dispatcher, s, 2)
 	}
@@ -95,11 +90,9 @@ func (m *TicTacToeMatch) MatchJoin(ctx context.Context, logger runtime.Logger, d
 func (m *TicTacToeMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, messages []runtime.MatchData) interface{} {
 	s := state.(*MatchState)
 
-	// ── Grace period countdown ────────────────────────────────────────────
 	if s.DisconnectedUser != "" && !s.GameOver {
 		ticksLeft := ReconnectGraceTicks - (tick - s.DisconnectTick)
 
-		// Broadcast countdown every tick so client can show timer
 		if ticksLeft > 0 {
 			type CountdownPayload struct {
 				SecondsLeft int `json:"seconds_left"`
@@ -109,7 +102,6 @@ func (m *TicTacToeMatch) MatchLoop(ctx context.Context, logger runtime.Logger, d
 			dispatcher.BroadcastMessage(6, data, nil, nil, true)
 		}
 
-		// Grace period expired — remaining player wins
 		if tick-s.DisconnectTick >= ReconnectGraceTicks {
 			logger.Info("Grace period expired. Disconnected: %s", s.DisconnectedUser)
 			s.GameOver = true
@@ -124,7 +116,6 @@ func (m *TicTacToeMatch) MatchLoop(ctx context.Context, logger runtime.Logger, d
 		}
 	}
 
-	// ── Process moves ─────────────────────────────────────────────────────
 	for _, msg := range messages {
 		if msg.GetOpCode() != 1 {
 			continue
@@ -155,7 +146,6 @@ func (m *TicTacToeMatch) MatchLoop(ctx context.Context, logger runtime.Logger, d
 			s.Winner = userID
 			UpdateLeaderboard(ctx, logger, nk, userID, 10)
 
-			// Find loser ID
 			loserID := ""
 			for id := range s.Marks {
 				if id != userID {
@@ -170,7 +160,6 @@ func (m *TicTacToeMatch) MatchLoop(ctx context.Context, logger runtime.Logger, d
 			s.GameOver = true
 			s.Winner = "draw"
 
-			// Both players draw
 			ids := []string{}
 			for id := range s.Marks {
 				ids = append(ids, id)
@@ -180,14 +169,13 @@ func (m *TicTacToeMatch) MatchLoop(ctx context.Context, logger runtime.Logger, d
 			}
 			BroadcastState(dispatcher, s, 3)
 		} else {
-			// Switch turn
 			for id := range s.Marks {
 				if id != s.Turn {
 					s.Turn = id
 					break
 				}
 			}
-			BroadcastState(dispatcher, s, 2) // GAME_STATE
+			BroadcastState(dispatcher, s, 2)
 		}
 	}
 
@@ -202,7 +190,6 @@ func (m *TicTacToeMatch) MatchLeave(ctx context.Context, logger runtime.Logger, 
 		s.DisconnectTick = tick
 		logger.Info("Player disconnected, grace period started: %s", s.DisconnectedUser)
 
-		// Notify remaining player immediately
 		type OpponentLeftPayload struct {
 			SecondsLeft int `json:"seconds_left"`
 		}
@@ -220,8 +207,6 @@ func (m *TicTacToeMatch) MatchTerminate(ctx context.Context, logger runtime.Logg
 func (m *TicTacToeMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, dispatcher runtime.MatchDispatcher, tick int64, state interface{}, data string) (interface{}, string) {
 	return state, ""
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 type ClientState struct {
 	Board       []string `json:"board"`

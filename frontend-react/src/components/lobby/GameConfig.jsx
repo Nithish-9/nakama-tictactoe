@@ -37,7 +37,6 @@ export default function GameConfig({ onFindMatch, onCreateRoom, onJoinRoom, load
         <span className="text-cyan">SELECT</span> MODE
       </h2>
 
-      {/* Mode cards */}
       <div className="mode-grid">
         {MODES.map(m => (
           <button
@@ -54,7 +53,6 @@ export default function GameConfig({ onFindMatch, onCreateRoom, onJoinRoom, load
         ))}
       </div>
 
-      {/* Actions */}
       <div className="config-actions">
         <button
           className="btn btn-primary config-btn"

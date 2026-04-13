@@ -9,8 +9,6 @@ export const client = new Client(NAKAMA_KEY, NAKAMA_HOST, NAKAMA_PORT, USE_SSL);
 
 const SESSION_KEY = "nakama_session";
 
-// ── Session persistence ───────────────────────────────────────────────────────
-
 export function saveSession(session) {
   localStorage.setItem(SESSION_KEY, JSON.stringify({
     token: session.token,
@@ -33,8 +31,6 @@ export function clearSession() {
   localStorage.removeItem(SESSION_KEY);
 }
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
-
 export async function authenticateDevice(deviceId, username) {
   let session;
 
@@ -55,7 +51,7 @@ export async function authenticateDevice(deviceId, username) {
         username: username,
         display_name: username,
       });
-    } catch { /* ignore */ }
+    } catch {  }
   }
 
   saveSession(session);
@@ -89,10 +85,10 @@ export async function connectSocket(session) {
   if (_socket) return _socket;
   _socket = client.createSocket(USE_SSL, true);
   await _socket.connect(session, true);
-  _socket.onmatchdata = (d) => console.log("🟢 MATCH DATA:", d);
-  _socket.onmatchpresence = (d) => console.log("🟡 PRESENCE:", d);
-  _socket.ondisconnect = (d) => console.log("🔴 DISCONNECTED:", d);
-  _socket.onerror = (d) => console.error("❌ SOCKET ERROR:", d);
+  _socket.onmatchdata = (d) => console.log("MATCH DATA:", d);
+  _socket.onmatchpresence = (d) => console.log("PRESENCE:", d);
+  _socket.ondisconnect = (d) => console.log("DISCONNECTED:", d);
+  _socket.onerror = (d) => console.error("SOCKET ERROR:", d);
   return _socket;
 }
 

@@ -8,7 +8,6 @@
   animation: fadeIn 0.4s ease;
 }
 
-/* Header */
 .game-header {
   width: 100%;
   max-width: 480px;
@@ -64,7 +63,6 @@
   max-width: 100px;
 }
 
-/* Center */
 .game-center-info { flex-shrink: 0; }
 
 .vs-badge {
@@ -78,7 +76,6 @@
   border-radius: 20px;
 }
 
-/* Timer ring */
 .timer-ring {
   width: 52px;
   height: 52px;
@@ -97,7 +94,6 @@
   transition: color 0.5s;
 }
 
-/* Turn indicator */
 .turn-indicator {
   font-family: var(--font-display);
   font-size: 0.7rem;
@@ -129,7 +125,6 @@
 }
 .my-turn .turn-dot { animation: pulse-ring 1.5s ease-in-out infinite; }
 
-/* Board */
 .board-wrapper {
   flex: 1;
   display: flex;
@@ -152,7 +147,6 @@
 
 .board.board-finished { opacity: 0.6; pointer-events: none; }
 
-/* Cell */
 .cell {
   background: rgba(8, 12, 35, 0.6);
   border: 1px solid var(--border);
@@ -188,7 +182,6 @@
   50% { box-shadow: 0 0 20px rgba(255,255,255,0.2); }
 }
 
-/* Mark */
 .cell-mark {
   font-family: var(--font-display);
   font-weight: 900;
@@ -210,7 +203,6 @@
   filter: drop-shadow(0 0 10px var(--o-glow));
 }
 
-/* Hint (hover ghost) */
 .cell-hint {
   font-family: var(--font-display);
   font-weight: 900;
@@ -221,7 +213,6 @@
 }
 .cell-hoverable:hover .cell-hint { color: rgba(0, 212, 255, 0.35); }
 
-/* Win-line SVG */
 .win-line-svg {
   position: absolute;
   inset: 0;
@@ -239,7 +230,6 @@
   to { stroke-dashoffset: 0; }
 }
 
-/* Match ID bar */
 .match-id-bar {
   display: flex;
   align-items: center;
@@ -258,7 +248,6 @@
   font-size: 0.62rem;
 }
 
-/* ── Result overlay ────────────────────────────────────────────────────────── */
 .result-overlay {
   position: fixed;
   inset: 0;

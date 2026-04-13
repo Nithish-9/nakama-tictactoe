@@ -26,14 +26,12 @@ export default function TicTacToe({
   const [result, setResult]         = useState(null);
   const [timeLeft, setTimeLeft]     = useState(null);
 
-  // Refs to avoid stale closures inside onmatchdata
   const resultRef    = useRef(null);
   const mySymbolRef  = useRef(mySymbol);
 
   useEffect(() => { resultRef.current   = result;   }, [result]);
   useEffect(() => { mySymbolRef.current = mySymbol; }, [mySymbol]);
 
-  // ── Match data handler ──────────────────────────────────────────────────
   useEffect(() => {
     if (!socket) return;
 
@@ -63,7 +61,6 @@ export default function TicTacToe({
         setBoard(newBoard);
         setCurrentTurn(turn);
 
-        // Use ref — not stale closure
         if (!resultRef.current) {
           const res = checkWinner(newBoard);
           if (res) setResult(res);
@@ -83,7 +80,7 @@ export default function TicTacToe({
 
     socket.onmatchdata = onMatchData;
     return () => { socket.onmatchdata = () => {}; };
-  }, [socket]); // ← only socket, no stale deps
+  }, [socket]);
 
   function getWinLine(b, w) {
     if (!w || w === "draw" || !b) return [];
@@ -93,7 +90,6 @@ export default function TicTacToe({
     return [];
   }
 
-  // ── Move ────────────────────────────────────────────────────────────────
   const isMyTurn = currentTurn === mySymbol && !result;
 
   async function handleCellClick(idx) {
@@ -105,19 +101,16 @@ export default function TicTacToe({
         OpCode.MOVE,
         JSON.stringify({ index: idx })
       );
-      // Do NOT update board locally — wait for GAME_STATE from server
     } catch (err) {
       console.error("Move failed", err);
     }
   }
 
-  // ── Leave ────────────────────────────────────────────────────────────────
   async function handleLeave() {
     try { await leaveMatch(socket, match.match_id); } catch {}
     onGameEnd(result);
   }
 
-  // ── UI ───────────────────────────────────────────────────────────────────
   const winLine      = result?.line ?? [];
   const timerColor   = timeLeft !== null && timeLeft <= 10 ? "var(--pink)" : "var(--cyan)";
   const myTurnLabel  = isMyTurn ? `Your turn (${mySymbol})` : `${opponentName}'s turn`;
