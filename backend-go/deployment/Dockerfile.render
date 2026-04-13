@@ -19,4 +19,4 @@ COPY deployment/render.yml /nakama/data/local.yml
 
 EXPOSE 7350 7351 7349
 
-CMD ["/bin/sh", "-ec", "/nakama/nakama migrate up --database.address postgres://nithish:66Rw9J4uZyzysf0kz0pXwT9ZB6NZXu6H@dpg-d7ebncjeo5us7385rm0g-a:5432/nakama_2otn?sslmode=require && /nakama/nakama --config /nakama/data/local.yml --database.address postgres://nithish:66Rw9J4uZyzysf0kz0pXwT9ZB6NZXu6H@dpg-d7ebncjeo5us7385rm0g-a:5432/nakama_2otn?sslmode=require"]
+CMD ["/bin/sh", "-ec", "/nakama/nakama migrate up --database.address nithish:66Rw9J4uZyzysf0kz0pXwT9ZB6NZXu6H@dpg-d7ebncjeo5us7385rm0g-a:5432/nakama_2otn?sslmode=require && /nakama/nakama --config /nakama/data/local.yml --database.address nithish:66Rw9J4uZyzysf0kz0pXwT9ZB6NZXu6H@dpg-d7ebncjeo5us7385rm0g-a:5432/nakama_2otn?sslmode=require"]
