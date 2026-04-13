@@ -1,4 +1,4 @@
-name: nakama
+name: nakama-tictactoe
 data_dir: /nakama/data
 
 logger:
@@ -19,5 +19,3 @@ session:
   cors_allowed_origins:
     - "*"
 
-runtime:
-  path: /nakama/data/modules

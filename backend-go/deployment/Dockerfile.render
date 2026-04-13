@@ -5,7 +5,6 @@ ENV CGO_ENABLED=1
 
 WORKDIR /backend-go
 
-# Pre-copying mod files improves layer caching
 COPY go.mod go.sum ./
 RUN go mod download
 
@@ -15,13 +14,9 @@ RUN go build --trimpath --buildmode=plugin -o ./backend.so
 
 FROM heroiclabs/nakama:3.37.0
 
-WORKDIR /nakama/
-
 COPY --from=builder /backend-go/backend.so /nakama/data/modules/
 COPY deployment/render.yml /nakama/data/local.yml
 
-# Nakama Ports
 EXPOSE 7350 7351 7349
 
-# Use double quotes for the variable to handle special characters in the URL
-CMD ["/bin/sh", "-c", "./nakama migrate up --database.address \"$DB_URL\" && ./nakama --config /nakama/data/local.yml --database.address \"$DB_URL\""]
+CMD ["/bin/sh", "-ec", "/nakama/nakama migrate up --database.address postgres://nithish:66Rw9J4uZyzysf0kz0pXwT9ZB6NZXu6H@dpg-d7ebncjeo5us7385rm0g-a:5432/nakama_2otn?sslmode=require && /nakama/nakama --config /nakama/data/local.yml --database.address postgres://nithish:66Rw9J4uZyzysf0kz0pXwT9ZB6NZXu6H@dpg-d7ebncjeo5us7385rm0g-a:5432/nakama_2otn?sslmode=require"]
