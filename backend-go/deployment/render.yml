@@ -21,3 +21,7 @@ session:
 
 runtime:
   path: /nakama/data/modules
+
+database:
+  address:
+    - "postgres://nithish:66Rw9J4uZyzysf0kz0pXwT9ZB6NZXu6H@dpg-d7ebncjeo5us7385rm0g-a:5432/nakama_2otn?sslmode=require"
