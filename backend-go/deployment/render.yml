@@ -1,0 +1,23 @@
+name: nakama
+data_dir: /nakama/data
+
+logger:
+  level: info
+
+console:
+  port: 7351
+  username: admin
+  password: password
+
+socket:
+  port: 7350
+  max_message_size_bytes: 4096
+
+session:
+  token_expiry_sec: 7200
+  refresh_token_expiry_sec: 604800
+  cors_allowed_origins:
+    - "*"
+
+runtime:
+  path: /nakama/data/modules
