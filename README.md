@@ -49,7 +49,11 @@ Users can skip the public matchmaker by creating a room and sharing its unique M
 ### Frontend (React + Vite)
 1. **Navigate**: `cd frontend-react`.
 2. **Install**: `npm install`.
-3. **Configure**: Set `VITE_NAKAMA_HOST=127.0.0.1` and `VITE_NAKAMA_PORT` in your `.env` file.
+3. **Configure**: Set up your `.env` file with the following variables:
+   * `VITE_NAKAMA_HOST=127.0.0.1`
+   * `VITE_NAKAMA_PORT=7350`
+   * `VITE_NAKAMA_KEY=defaultkey`
+   * `VITE_NAKAMA_SSL=false`
 4. **Start**: `npm run dev`.
 
 ---
